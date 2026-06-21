@@ -141,7 +141,7 @@ export async function dlImg(url, name) {
 // ---- LOGO ----
 export function PostFacilLogo({ size = 72, style = {} }) {
   return (
-    <div style={{ width: size, height: size, borderRadius: size * 0.22, background: "linear-gradient(145deg,#1a6fd4,#0ea86e)", display: "flex", alignItems: "center", justifyContent: "center", flexDirection: "column", flexShrink: 0, position: "relative", overflow: "hidden", boxShadow: `0 ${size * 0.06}px ${size * 0.18}px rgba(14,168,110,0.35)`, ...style }}>
+    <div style={{ width: size, height: size, borderRadius: size * 0.22, background: "linear-gradient(145deg,#003BA0,#002D7A)", display: "flex", alignItems: "center", justifyContent: "center", flexDirection: "column", flexShrink: 0, position: "relative", overflow: "hidden", boxShadow: `0 ${size * 0.06}px ${size * 0.18}px rgba(0,59,160,0.35)`, ...style }}>
       <div style={{ position: "absolute", inset: 0, borderRadius: "inherit", border: `${size * 0.025}px solid rgba(255,255,255,0.18)`, pointerEvents: "none" }} />
       <div style={{ fontFamily: "'Arial Black',Arial,sans-serif", fontWeight: 900, fontSize: size * 0.31, color: "white", lineHeight: 1.05 }}>Post</div>
       <div style={{ fontFamily: "'Arial Black',Arial,sans-serif", fontWeight: 900, fontSize: size * 0.31, color: "white", lineHeight: 1.05 }}>Fácil</div>
@@ -184,9 +184,9 @@ export function QuotaBar({ profile }) {
     { label: "Este mês", used: q.monthCount, total: lim.monthly, msg: (p) => (p >= 100 ? "Renova no próximo mês" : lim.monthly - q.monthCount + " restante(s)") },
   ];
   return (
-    <div style={{ background: "white", borderRadius: 14, padding: "14px 16px", border: "1px solid #e2e8f0", boxShadow: "0 2px 8px rgba(26,79,214,0.07)", marginBottom: 14 }}>
+    <div style={{ background: "white", borderRadius: 14, padding: "14px 16px", border: "1px solid #e2e8f0", boxShadow: "0 2px 8px rgba(0,59,160,0.07)", marginBottom: 14 }}>
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 10 }}>
-        <span style={{ fontSize: 11, fontWeight: 800, color: "#1a4fd6", textTransform: "uppercase", letterSpacing: "0.5px" }}>🎨 Cota de Imagens IA</span>
+        <span style={{ fontSize: 11, fontWeight: 800, color: "#003BA0", textTransform: "uppercase", letterSpacing: "0.5px" }}>🎨 Cota de Imagens IA</span>
         {hasOv && <span style={{ fontSize: 10, fontWeight: 700, padding: "2px 7px", borderRadius: 6, background: "#fef3c7", color: "#92400e", border: "1px solid #fcd34d" }}>Personalizado</span>}
       </div>
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
@@ -213,12 +213,12 @@ export function QuotaBar({ profile }) {
 // ---- HEADER ----
 export function AppHeader({ onLogo, leftBtn, title, showHome, showHist, onHome, onHist, tab, isPremium }) {
   return (
-    <div style={{ background: "white", borderBottom: "1px solid #e2e8f0", height: 58, display: "flex", alignItems: "center", justifyContent: "space-between", padding: "0 18px", boxShadow: "0 2px 12px rgba(26,79,214,0.07)", position: "sticky", top: 0, zIndex: 100 }}>
+    <div style={{ background: "white", borderBottom: "1px solid #e2e8f0", height: 58, display: "flex", alignItems: "center", justifyContent: "space-between", padding: "0 18px", boxShadow: "0 2px 12px rgba(0,59,160,0.07)", position: "sticky", top: 0, zIndex: 100 }}>
       {leftBtn || (
         <div onClick={onLogo} style={{ display: "flex", alignItems: "center", gap: 8, cursor: "pointer" }}>
-          <span style={{ fontFamily: "Nunito,sans-serif", fontWeight: 800, fontSize: 18, background: "linear-gradient(135deg,#1a4fd6,#0f9b6e)", WebkitBackgroundClip: "text", WebkitTextFillColor: "transparent" }}>Post Fácil</span>
+          <span style={{ fontFamily: "Nunito,sans-serif", fontWeight: 800, fontSize: 18, background: "linear-gradient(135deg,#003BA0,#002D7A)", WebkitBackgroundClip: "text", WebkitTextFillColor: "transparent" }}>Post Fácil</span>
           {isPremium !== undefined && (
-            <span style={{ fontSize: 11, fontWeight: 800, padding: "3px 9px", borderRadius: 20, background: isPremium ? "linear-gradient(135deg,#fef3c7,#fde68a)" : "#dbeafe", color: isPremium ? "#92400e" : "#1e40af", border: isPremium ? "1px solid #fcd34d" : "none" }}>
+            <span style={{ fontSize: 11, fontWeight: 800, padding: "3px 9px", borderRadius: 20, background: isPremium ? "linear-gradient(135deg,#fef3c7,#fde68a)" : "#dbeafe", color: isPremium ? "#92400e" : "#003BA0", border: isPremium ? "1px solid #fcd34d" : "none" }}>
               {isPremium ? "🌟 Premium" : "✍️ Básico"}
             </span>
           )}
@@ -226,8 +226,8 @@ export function AppHeader({ onLogo, leftBtn, title, showHome, showHist, onHome, 
       )}
       {title && <span style={{ fontFamily: "Nunito,sans-serif", fontWeight: 800, fontSize: 16, color: "#0f172a", position: "absolute", left: "50%", transform: "translateX(-50%)" }}>{title}</span>}
       <div style={{ display: "flex", gap: 6 }}>
-        {showHome && <button onClick={onHome} style={{ padding: "8px 14px", borderRadius: 10, border: "1.5px solid " + (tab === "home" ? "#bfdbfe" : "#e2e8f0"), background: tab === "home" ? "#eff6ff" : "white", cursor: "pointer", fontSize: 13, fontWeight: 700, color: tab === "home" ? "#1a4fd6" : "#64748b", fontFamily: "Nunito,sans-serif" }}>🏠 Início</button>}
-        {showHist && <button onClick={onHist} style={{ padding: "8px 14px", borderRadius: 10, border: "1.5px solid " + (tab === "hist" ? "#bfdbfe" : "#e2e8f0"), background: tab === "hist" ? "#eff6ff" : "white", cursor: "pointer", fontSize: 13, fontWeight: 700, color: tab === "hist" ? "#1a4fd6" : "#64748b", fontFamily: "Nunito,sans-serif" }}>📋 Histórico</button>}
+        {showHome && <button onClick={onHome} style={{ padding: "8px 14px", borderRadius: 10, border: "1.5px solid " + (tab === "home" ? "#bfdbfe" : "#e2e8f0"), background: tab === "home" ? "#eff6ff" : "white", cursor: "pointer", fontSize: 13, fontWeight: 700, color: tab === "home" ? "#003BA0" : "#64748b", fontFamily: "Nunito,sans-serif" }}>🏠 Início</button>}
+        {showHist && <button onClick={onHist} style={{ padding: "8px 14px", borderRadius: 10, border: "1.5px solid " + (tab === "hist" ? "#bfdbfe" : "#e2e8f0"), background: tab === "hist" ? "#eff6ff" : "white", cursor: "pointer", fontSize: 13, fontWeight: 700, color: tab === "hist" ? "#003BA0" : "#64748b", fontFamily: "Nunito,sans-serif" }}>📋 Histórico</button>}
       </div>
     </div>
   );

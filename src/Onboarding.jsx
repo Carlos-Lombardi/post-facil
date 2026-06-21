@@ -12,12 +12,12 @@ import { DADOS } from "./dados.js";
 
 /* ----------  PALETA / TOKENS VISUAIS  ---------- */
 const C = {
-  bg: "#F4F8FB",
+  bg: "#F0F5FB",
   card: "#FFFFFF",
   ink: "#16323F",
   sub: "#5C7686",
   line: "#E4EEF3",
-  comercio: "#2E9E73", comercioBg: "#E7F6EF",
+  comercio: "#003BA0", comercioBg: "#E6EEF9",
   profissional: "#3B7DD8", profissionalBg: "#E8F1FC",
   pessoal: "#9B5DE5", pessoalBg: "#F2E9FC",
 };
@@ -27,7 +27,7 @@ const FONT =
 /* ============================================================
    COMPONENTE PRINCIPAL
    ============================================================ */
-export default function Onboarding({ onConcluir }) {
+export default function Onboarding({ onConcluir, onIrParaDashboard, onVoltar }) {
   // Fluxo: tipo → lista → identificacao → tom → logo → perguntas → fim
   const [tela, setTela] = useState("tipo");
   const [tipo, setTipo] = useState(null);
@@ -73,7 +73,7 @@ export default function Onboarding({ onConcluir }) {
     <div style={{ fontFamily: FONT, background: C.bg, minHeight: "100vh", color: C.ink }}>
       <link href="https://fonts.googleapis.com/css2?family=Nunito:wght@400;600;700;800;900&display=swap" rel="stylesheet" />
       <div style={{ maxWidth: 440, margin: "0 auto", padding: "0 18px 40px" }}>
-        {tela === "tipo" && <TelaTipo onEscolher={escolherTipo} />}
+        {tela === "tipo" && <TelaTipo onEscolher={escolherTipo} onVoltar={onVoltar} />}
 
         {tela === "lista" && (
           <TelaLista tipo={DADOS[tipo]} onVoltar={() => setTela("tipo")} onEscolher={escolherSegmento} />
@@ -123,6 +123,7 @@ export default function Onboarding({ onConcluir }) {
             cadastro={cadastro}
             onCriarLogo={() => onConcluir?.({ acao: "criar_logo" })}
             onReiniciar={reset}
+            onIrParaDashboard={onIrParaDashboard}
           />
         )}
       </div>
@@ -131,10 +132,11 @@ export default function Onboarding({ onConcluir }) {
 }
 
 /* ===========  TELA 1 — ESCOLHA DO TIPO  =========== */
-function TelaTipo({ onEscolher }) {
+function TelaTipo({ onEscolher, onVoltar }) {
   const tipos = ["comercio", "profissional", "pessoal"];
   return (
     <div>
+      {onVoltar && <BotaoVoltar onClick={onVoltar} rotulo="Início" />}
       <Topo titulo="Vamos começar! 🎉" sub="Para criar os melhores posts, conta pra gente o que você tem:" />
       <div style={{ display: "flex", flexDirection: "column", gap: 14, marginTop: 22 }}>
         {tipos.map((t, i) => {
@@ -298,7 +300,7 @@ function TelaPerguntas({ tipoInfo, segmento, onVoltar, onConcluir }) {
       </div>
       <div key={i} style={{ animation: "slideIn .3s ease both" }}>
         <h2 style={{ fontSize: 21, fontWeight: 800, lineHeight: 1.3, margin: "0 0 8px" }}>{atual.q}</h2>
-        <div style={{ fontSize: 13.5, color: C.sub, fontStyle: "italic", lineHeight: 1.5, marginBottom: 16 }}>{atual.dica}</div>
+        <div style={{ fontSize: 14.5, color: "#003BA0", fontStyle: "italic", lineHeight: 1.55, marginBottom: 16 }}>{atual.dica}</div>
         <textarea
           ref={taRef}
           value={valor}
@@ -326,10 +328,19 @@ function TelaPerguntas({ tipoInfo, segmento, onVoltar, onConcluir }) {
 }
 
 /* ===========  TELA 4 — CONCLUSÃO  =========== */
-function TelaFim({ tipoInfo, segmento, cadastro, onCriarLogo, onReiniciar }) {
+function TelaFim({ tipoInfo, segmento, cadastro, onCriarLogo, onReiniciar, onIrParaDashboard }) {
   const cor = tipoInfo.cor;
   const qtd = Object.values(cadastro.respostas || {}).filter((v) => v && v.trim()).length;
-  const precisaLogo = cadastro.criarLogoDepois && !cadastro.logo;
+  const precisaLogo = !cadastro.logo;
+  const tons = (cadastro.tons || []).join(", ") || "—";
+
+  const LR = ({ r, v }) => (
+    <div style={{ display: "flex", justifyContent: "space-between", paddingBottom: 7, borderBottom: `1px solid ${C.line}` }}>
+      <span style={{ fontSize: 12.5, fontWeight: 700, color: C.sub }}>{r}</span>
+      <span style={{ fontSize: 13, fontWeight: 700, color: C.ink, textAlign: "right", maxWidth: "60%" }}>{v || "—"}</span>
+    </div>
+  );
+
   return (
     <div style={{ textAlign: "center", paddingTop: 40, animation: "fadeUp .5s ease both" }}>
       <div style={{ width: 88, height: 88, margin: "0 auto 20px", borderRadius: "50%", background: tipoInfo.corBg, display: "grid", placeItems: "center", fontSize: 44 }}>✅</div>
@@ -337,24 +348,38 @@ function TelaFim({ tipoInfo, segmento, cadastro, onCriarLogo, onReiniciar }) {
       <p style={{ color: C.sub, fontSize: 15.5, lineHeight: 1.55, margin: "0 0 6px" }}>
         Você configurou <b style={{ color: C.ink }}>{segmento.nome}</b> e respondeu <b style={{ color: cor }}>{qtd}</b> {qtd === 1 ? "pergunta" : "perguntas"}.
       </p>
-      <p style={{ color: C.sub, fontSize: 15.5, lineHeight: 1.55, margin: "0 0 26px" }}>
-        Agora a IA já sabe falar do jeitinho do seu negócio. 🚀
+      <p style={{ color: C.sub, fontSize: 15.5, lineHeight: 1.55, margin: "0 0 24px" }}>
+        Agora nossa IA já sabe falar do jeitinho do seu negócio. 🚀
       </p>
 
       {precisaLogo && (
         <div style={{ background: tipoInfo.corBg, border: `2px solid ${cor}33`, borderRadius: 18, padding: "18px 16px", marginBottom: 18, textAlign: "left", animation: "fadeUp .4s ease .1s both" }}>
           <div style={{ fontWeight: 800, fontSize: 15.5, marginBottom: 4 }}>🎨 Que tal criar seu logo agora?</div>
           <div style={{ fontSize: 13.5, color: C.sub, lineHeight: 1.5, marginBottom: 14 }}>
-            A IA cria um logo pra você em segundos, com a cara do seu negócio. Seus posts ficam muito mais profissionais com ele!
+            Nossa IA cria um logo pra você em segundos, com a cara do seu negócio. Seus posts ficam muito mais profissionais com ele!
           </div>
           <button onClick={onCriarLogo} style={{ width: "100%", padding: 15, fontSize: 15.5, fontWeight: 800, fontFamily: FONT, color: "#fff", background: cor, border: "none", borderRadius: 14, cursor: "pointer", boxShadow: `0 6px 18px ${cor}44` }}>
-            Criar meu logo com IA ✨
+            Criar meu logo com nossa IA ✨
           </button>
         </div>
       )}
 
-      <button style={{ width: "100%", padding: 16, fontSize: 16.5, fontWeight: 800, fontFamily: FONT, color: precisaLogo ? cor : "#fff", background: precisaLogo ? C.card : cor, border: precisaLogo ? `2px solid ${cor}` : "none", borderRadius: 16, cursor: "pointer", boxShadow: precisaLogo ? "none" : `0 6px 18px ${cor}44`, marginBottom: 12 }}>
-        {precisaLogo ? "Pular e criar meu primeiro post" : "Criar meu primeiro post ✨"}
+      {/* Resumo do perfil */}
+      <div style={{ background: C.card, borderRadius: 16, border: `1px solid ${C.line}`, overflow: "hidden", marginBottom: 18, textAlign: "left" }}>
+        <div style={{ padding: "12px 16px", background: "#E6EEF9", borderBottom: `1px solid ${C.line}`, fontWeight: 800, fontSize: 14, color: C.ink }}>📋 Resumo do seu perfil</div>
+        <div style={{ padding: "14px 16px", display: "flex", flexDirection: "column", gap: 8 }}>
+          <LR r="Negócio" v={cadastro.nome} />
+          <LR r="Segmento" v={segmento.nome} />
+          <LR r="Tom de voz" v={tons} />
+          <LR r="Logo" v={cadastro.logo ? "Enviado ✓" : "Criar depois"} />
+          <LR r="Respostas" v={qtd + " de 10 preenchidas"} />
+        </div>
+      </div>
+
+      <button
+        onClick={onIrParaDashboard}
+        style={{ width: "100%", padding: 16, fontSize: 16.5, fontWeight: 800, fontFamily: FONT, color: "#fff", background: "#003BA0", border: "none", borderRadius: 16, cursor: "pointer", boxShadow: "0 6px 20px rgba(0,59,160,0.25)", marginBottom: 12 }}>
+        Criar meu primeiro post ✨
       </button>
       <button onClick={onReiniciar} style={{ background: "none", border: "none", color: C.sub, fontSize: 14, fontWeight: 600, cursor: "pointer", fontFamily: FONT }}>← Recomeçar</button>
       <Estilos />
@@ -486,15 +511,22 @@ function TelaLogo({ tipoInfo, valores, onVoltar, onAvancar }) {
       <BotaoVoltar onClick={onVoltar} rotulo="Voltar" />
       <PassoIndicador atual={3} cor={cor} />
       <Topo titulo="Você tem um logotipo?" cor={cor}
-        sub="O logo entra nos seus posts e ajuda a IA a usar as cores e o estilo da sua marca." />
+        sub="O logo entra nos seus posts e ajuda nossa IA a usar as cores e o estilo da sua marca." />
       <div style={{ marginTop: 22 }}>
         {!logo ? (
-          <button onClick={() => fileRef.current?.click()}
-            style={{ width: "100%", border: `2px dashed ${cor}`, background: tipoInfo.corBg, borderRadius: 20, padding: "34px 20px", cursor: "pointer", textAlign: "center", fontFamily: FONT, animation: "fadeUp .35s ease both" }}>
-            <div style={{ fontSize: 40, marginBottom: 10 }}>📤</div>
-            <div style={{ fontWeight: 800, fontSize: 16, color: C.ink, marginBottom: 4 }}>Enviar meu logotipo</div>
-            <div style={{ fontSize: 13, color: C.sub }}>Toque para escolher uma imagem (PNG ou JPG)</div>
-          </button>
+          <div style={{ display: "flex", flexDirection: "column", gap: 12, animation: "fadeUp .35s ease both" }}>
+            <button onClick={() => fileRef.current?.click()}
+              style={{ width: "100%", padding: "16px", background: "#003BA0", color: "white", border: "none", borderRadius: 16, fontSize: 16, fontWeight: 800, cursor: "pointer", fontFamily: FONT }}>
+              📤 Enviar meu logotipo
+            </button>
+            <button onClick={() => onAvancar({ logo: null, criarLogoDepois: true })}
+              style={{ width: "100%", padding: "16px", background: C.card, color: "#003BA0", border: "2px solid #003BA0", borderRadius: 16, fontSize: 16, fontWeight: 800, cursor: "pointer", fontFamily: FONT }}>
+              Continuar cadastro sem logo
+            </button>
+            <div style={{ fontSize: 13.5, color: "#003BA0", fontStyle: "italic", textAlign: "center", marginTop: 4 }}>
+              Não tem logo? Podemos criar um pra você depois.
+            </div>
+          </div>
         ) : (
           <div style={{ textAlign: "center", animation: "fadeUp .3s ease both" }}>
             <div style={{ width: 150, height: 150, margin: "0 auto 14px", borderRadius: 20, border: `2px solid ${C.line}`, background: "#fff", display: "grid", placeItems: "center", overflow: "hidden" }}>
@@ -509,16 +541,11 @@ function TelaLogo({ tipoInfo, valores, onVoltar, onAvancar }) {
         )}
         <input ref={fileRef} type="file" accept="image/*" onChange={escolherArquivo} style={{ display: "none" }} />
       </div>
-      <BotaoPrincipal cor={cor} desabilitado={analisando} onClick={() => onAvancar({ logo, criarLogoDepois: false })}>
-        {logo ? "Continuar →" : "Continuar com logo"}
-      </BotaoPrincipal>
-      {!logo && (
-        <button onClick={() => onAvancar({ logo: null, criarLogoDepois: true })}
-          style={{ display: "block", width: "100%", marginTop: 12, padding: "15px", background: C.card, border: `2px solid ${C.line}`, borderRadius: 16, color: C.ink, fontSize: 15, fontWeight: 800, cursor: "pointer", fontFamily: FONT }}>
-          ✨ Não tenho logo — criar depois
-        </button>
+      {logo && (
+        <BotaoPrincipal cor={cor} desabilitado={analisando} onClick={() => onAvancar({ logo, criarLogoDepois: false })}>
+          Continuar →
+        </BotaoPrincipal>
       )}
-      {!logo && (<Ajuda center>Sem problema! Você termina o cadastro e cria seu logo no final, com a ajuda da IA.</Ajuda>)}
       <Estilos />
     </div>
   );
@@ -546,7 +573,7 @@ function Rotulo({ children }) {
   return <label style={{ display: "block", fontWeight: 800, fontSize: 15.5, marginBottom: 8 }}>{children}</label>;
 }
 function Ajuda({ children, center }) {
-  return <div style={{ fontSize: 13, color: C.sub, lineHeight: 1.45, marginTop: 7, textAlign: center ? "center" : "left", fontStyle: "italic" }}>{children}</div>;
+  return <div style={{ fontSize: 14, color: "#003BA0", lineHeight: 1.5, marginTop: 7, textAlign: center ? "center" : "left", fontStyle: "italic" }}>{children}</div>;
 }
 function inp(cor) {
   return { width: "100%", boxSizing: "border-box", padding: "15px 16px", fontSize: 16, fontFamily: FONT, borderRadius: 16, border: `2px solid ${C.line}`, outline: "none", background: C.card, color: C.ink };

@@ -4,7 +4,7 @@
 // ============================================================
 
 const CORS = {
-  comercio: "#2E9E73", comercioBg: "#E7F6EF",
+  comercio: "#003BA0", comercioBg: "#E6EEF9",
   profissional: "#3B7DD8", profissionalBg: "#E8F1FC",
   pessoal: "#9B5DE5", pessoalBg: "#F2E9FC",
 };
