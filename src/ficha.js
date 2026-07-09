@@ -12,6 +12,7 @@ export function criarFicha(dados) {
   return {
     // identificação
     nome: dados.nome || "",
+    nomePessoa: dados.nomePessoa || "",
     whatsapp: dados.whatsapp || "",
     // tipo e segmento
     tipo: dados.tipo || null,

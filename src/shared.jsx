@@ -69,6 +69,105 @@ export function incQuota(profile) {
   saveQuota(profile, q);
 }
 
+// ============================================================
+// CRÉDITOS DE POST (Seção 8 — sistema de créditos)
+// Diário: 5/dia · Mensal: 92 reais (cliente "conhece" 90; +2 cortesia).
+// Exibição SEMPRE em tom positivo (o que ele TEM, nunca o que gastou).
+// Diário esgotado NÃO bloqueia — passa a consumir do saldo mensal.
+// ============================================================
+export const POST_LIMITE_DIA = 5;
+export const POST_LIMITE_MES = 92;
+export const POST_MES_CONHECIDO = 90;
+
+export function getPostCreditos(profile) {
+  const key = "pf_posts_" + (profile?.whatsapp || "anon");
+  const today = new Date().toISOString().slice(0, 10);
+  const month = new Date().toISOString().slice(0, 7);
+  try {
+    const s = JSON.parse(localStorage.getItem(key) || "{}");
+    if (s.day !== today) { s.day = today; s.dayCount = 0; }
+    if (s.month !== month) { s.month = month; s.monthCount = 0; }
+    return { day: today, month, dayCount: s.dayCount || 0, monthCount: s.monthCount || 0 };
+  } catch {
+    return { day: today, month, dayCount: 0, monthCount: 0 };
+  }
+}
+export function incPostCreditos(profile) {
+  const c = getPostCreditos(profile);
+  c.dayCount++;
+  c.monthCount++;
+  try { localStorage.setItem("pf_posts_" + (profile?.whatsapp || "anon"), JSON.stringify(c)); } catch {}
+  return c;
+}
+// dias até a renovação (fim do mês corrente)
+function diasParaRenovar() {
+  const hoje = new Date();
+  const fim = new Date(hoje.getFullYear(), hoje.getMonth() + 1, 1);
+  const dias = Math.max(1, Math.ceil((fim - hoje) / 86400000));
+  return dias === 1 ? "1 dia" : dias + " dias";
+}
+// Mensagem do contador na tela de resultado (sempre em tom positivo)
+export function mensagemCreditos(profile) {
+  const { dayCount, monthCount } = getPostCreditos(profile);
+  if (monthCount >= POST_LIMITE_MES)
+    return `Você aproveitou até o último post do mês! 🎉 Seus créditos renovam automaticamente em ${diasParaRenovar()}. Já já a gente se vê por aqui! 😊`;
+  if (monthCount >= POST_MES_CONHECIDO)
+    return "Seus posts do mês chegaram ao fim — mas a gente não te deixa na mão! 🎁 Liberamos +2 posts de cortesia pra você. Aproveite! 💙";
+  if (dayCount >= POST_LIMITE_DIA)
+    return "Você já criou seus posts de hoje! 🎉 Quer continuar? Sem problema — a partir daqui, vamos usando seus posts do mês. Assim você não perde o embalo! 😊";
+  const restam = POST_LIMITE_DIA - dayCount;
+  return `Você ainda tem ${restam} post${restam === 1 ? "" : "s"} pra criar hoje ✨`;
+}
+// true quando ainda pode gerar (só trava de vez após os 92 do mês)
+export function podeGerarPost(profile) {
+  return getPostCreditos(profile).monthCount < POST_LIMITE_MES;
+}
+
+// ============================================================
+// SAUDAÇÃO MOTIVACIONAL (Seção 2)
+// Cumprimenta pelo primeiro nome, frase que varia a cada abertura,
+// com fallback caloroso SEM nome. Nunca exibe "Olá, !" vazio.
+// ============================================================
+const FRASES_SAUDACAO = [
+  "Hoje é dia de aparecer nas redes! 🚀",
+  "Bora criar algo incrível hoje? ✨",
+  "Que tal um post novo pra brilhar? 💙",
+  "Seu público está esperando por você! 😊",
+  "Vamos deixar seu negócio em destaque? 🌟",
+  "Tá na hora de mostrar seu trabalho pro mundo! 📲",
+];
+export function saudacaoMotivacional(nomePessoa) {
+  const nome = (nomePessoa || "").trim().split(/\s+/)[0] || "";
+  const h = new Date().getHours();
+  const periodo = h < 12 ? "Bom dia" : h < 18 ? "Boa tarde" : "Boa noite";
+  const emoji = h < 12 ? "🌅" : h < 18 ? "☀️" : "🌙";
+  const titulo = nome ? `${periodo}, ${nome}!` : `${periodo}!`;
+  // anti-repetição entre aberturas
+  let last = -1;
+  try { last = parseInt(sessionStorage.getItem("pf_saud_idx") ?? "-1"); } catch {}
+  let idx = Math.floor(Math.random() * FRASES_SAUDACAO.length);
+  while (FRASES_SAUDACAO.length > 1 && idx === last) idx = Math.floor(Math.random() * FRASES_SAUDACAO.length);
+  try { sessionStorage.setItem("pf_saud_idx", String(idx)); } catch {}
+  return { titulo, emoji, sub: FRASES_SAUDACAO[idx] };
+}
+
+// ============================================================
+// CONFIG DO ENVIO DIÁRIO NO WHATSAPP (Seção 7)
+// opt-in ativo; parar só dentro do app. Persistido por cliente.
+// ============================================================
+export function getWppConfig(profile) {
+  try {
+    return JSON.parse(localStorage.getItem("pf_wpp_" + (profile?.whatsapp || "anon")) || "null") ||
+      { ativo: false, hora: "09:00", formato: "alternar" };
+  } catch {
+    return { ativo: false, hora: "09:00", formato: "alternar" };
+  }
+}
+export function saveWppConfig(profile, cfg) {
+  try { localStorage.setItem("pf_wpp_" + (profile?.whatsapp || "anon"), JSON.stringify(cfg)); } catch {}
+  return cfg;
+}
+
 // ---- códigos premium ----
 export function getCodes() {
   try {

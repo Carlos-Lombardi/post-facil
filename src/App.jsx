@@ -1,13 +1,15 @@
 // ============================================================
 // POST FÁCIL — APP
 // ============================================================
-import { useState, useRef, useMemo } from "react";
+import { useState, useRef, useMemo, useEffect } from "react";
 import Onboarding from "./Onboarding.jsx";
 import { criarFicha, salvarFicha, carregarFicha } from "./ficha.js";
 import { DADOS } from "./dados.js";
 import {
   PostFacilLogo, AppHeader, Toast, useToast, QuotaBar,
   ADMIN_PASS, DEFAULT_CODES, getDefaultLimits, getOverrides,
+  saudacaoMotivacional, incPostCreditos, mensagemCreditos, podeGerarPost,
+  getWppConfig, saveWppConfig, doCopy,
 } from "./shared.jsx";
 
 // ============================================================
@@ -115,20 +117,32 @@ function ModalLembreteLogo({ onContinuar, onLogoSalvo, onCriarComIA }) {
 }
 
 // ============================================================
-// DASHBOARD
+// DASHBOARD (HOME)
+// Estrutura (de cima p/ baixo): cabeçalho → vitrine → saudação
+// → 3 botões de post → faixa "Recursos extras" → banner Catálogo
+// → banner Logo → rodapé → faixa verde final.
+// Ver 01_DOCUMENTOS/Direcao_Home_Posicionamento.md
 // ============================================================
+const BOTOES_POST = [
+  { ic: "✨", tipo: "negocio",  tt: "CRIAR POST DO MEU NEGÓCIO", ds: "Imagem, legenda, seu logo, suas cores... Um post pensado pra você 👋" },
+  { ic: "📷", tipo: "produto",  tt: "CRIAR POST DO MEU PRODUTO", ds: "Mande a foto ou vídeo do produto e deixa o resto com a gente 😉" },
+  { ic: "🔥", tipo: "promocao", tt: "CRIAR POST DE PROMOÇÃO",    ds: "Informe a oferta. Nós criamos o post 🎯" },
+];
+
 function Dashboard({ profile, onEdit, onLogoAtualizado }) {
   const prem = profile.plano === "premium";
-  const [tab, setTab] = useState("home");
   const [showLogoModal, setShowLogoModal] = useState(false);
-  const tons = (profile.tons || []).join(", ") || "—";
-  const respostas = profile.respostas || {};
-  const qtdResp = Object.values(respostas).filter((v) => v && String(v).trim()).length;
+  const [tipoPendente, setTipoPendente] = useState(null);
+  const [fluxoAtivo, setFluxoAtivo] = useState(null);
 
   const semLogo = !profile.logo;
   const ehPessoal = profile.tipo === "pessoal";
   const [showLogoOpcoes, setShowLogoOpcoes] = useState(false);
   const logoFileRef = useRef(null);
+  const [toast, showToast] = useToast();
+
+  // saudação motivacional (varia a cada abertura; usa o nome da pessoa)
+  const [saud] = useState(() => saudacaoMotivacional(profile.nomePessoa));
 
   function logoEscolhido(e) {
     const f = e.target.files?.[0];
@@ -138,72 +152,134 @@ function Dashboard({ profile, onEdit, onLogoAtualizado }) {
     reader.readAsDataURL(f);
   }
 
-  function tentarGerarPost() {
+  // clique num dos 3 botões → (lembrete de logo, se preciso) → inicia o fluxo
+  function tentarGerarPost(tipo) {
     const dismissido = sessionStorage.getItem("pf_logo_dismissed") === "1";
     if (semLogo && !ehPessoal && !dismissido) {
+      setTipoPendente(tipo);
       setShowLogoModal(true);
       return;
     }
-    // Fase 2: lógica de geração de post virá aqui
+    setFluxoAtivo(tipo);
   }
 
   function dispensarModal() {
     sessionStorage.setItem("pf_logo_dismissed", "1");
     setShowLogoModal(false);
+    if (tipoPendente) { setFluxoAtivo(tipoPendente); setTipoPendente(null); }
   }
 
   function logoSalvoDoModal(dataUrl) {
     setShowLogoModal(false);
     onLogoAtualizado(dataUrl);
+    if (tipoPendente) { setFluxoAtivo(tipoPendente); setTipoPendente(null); }
+  }
+
+  // fluxo de geração ocupa a tela toda
+  if (fluxoAtivo) {
+    return <FluxoGeracao tipo={fluxoAtivo} profile={profile} onSair={() => setFluxoAtivo(null)} />;
   }
 
   return (
-    <div style={{ minHeight: "100vh", background: "#F0F5FB", fontFamily: "Nunito,sans-serif" }}>
-      <AppHeader onLogo={() => setTab("home")} showHome={true} onHome={() => setTab("home")} tab={tab} isPremium={prem} />
-      <div style={{ maxWidth: 640, margin: "0 auto", padding: "24px 16px 56px" }}>
-        <div style={{ background: "white", borderRadius: 16, padding: "14px 16px", display: "flex", alignItems: "center", justifyContent: "space-between", border: "1px solid #e2e8f0", marginBottom: 16, boxShadow: "0 2px 12px rgba(0,59,160,0.07)" }}>
-          <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-            <div onClick={() => setShowLogoOpcoes(true)} style={{ cursor: "pointer" }}>
-              {profile.logo ? (
-                <img src={profile.logo} alt="logo" style={{ width: 44, height: 44, borderRadius: 12, objectFit: "cover", border: "2px solid #bfdbfe" }} />
-              ) : (
-                <div style={{ width: 44, height: 44, background: "#003BA0", borderRadius: 12, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 18, fontWeight: 900, color: "white" }}>
-                  {(profile.nome && profile.nome[0] ? profile.nome[0] : "?").toUpperCase()}
-                </div>
-              )}
-            </div>
-            <div>
-              <div style={{ fontWeight: 800, fontSize: 15 }}>{profile.nome || "Sem nome"}</div>
-              <div style={{ fontSize: 12, color: "#64748b", fontWeight: 600 }}>{profile.segmentoNome || "—"}</div>
-            </div>
+    <div style={{ minHeight: "100vh", background: "#EEF1FA", fontFamily: "Nunito,sans-serif", display: "flex", flexDirection: "column", alignItems: "center" }}>
+      {/* keyframes do logo flutuante na vitrine */}
+      <style>{`
+        @keyframes pfFloatLogo { 0%,100%{transform:translate(-50%,-34%);} 50%{transform:translate(-50%,-28%);} }
+        @keyframes pfFloatShadow { 0%,100%{width:120px;opacity:.5;} 50%{width:142px;opacity:.68;} }
+      `}</style>
+
+      <div style={{ width: "100%", maxWidth: 430, background: "#F0F5FB", minHeight: "100vh" }}>
+
+        {/* 1. CABEÇALHO */}
+        <div style={{ background: "#003BA0", color: "#fff", padding: "14px 16px", display: "flex", alignItems: "center", gap: 10 }}>
+          <div onClick={() => setShowLogoOpcoes(true)} style={{ width: 44, height: 44, borderRadius: 10, background: "#fff", display: "flex", alignItems: "center", justifyContent: "center", overflow: "hidden", cursor: "pointer", flexShrink: 0 }}>
+            {profile.logo ? (
+              <img src={profile.logo} alt="logo" style={{ width: "100%", height: "100%", objectFit: "contain", padding: 3, boxSizing: "border-box" }} />
+            ) : (
+              <span style={{ fontSize: 20, fontWeight: 900, color: "#003BA0" }}>{(profile.nome && profile.nome[0] ? profile.nome[0] : "?").toUpperCase()}</span>
+            )}
           </div>
-          <button onClick={onEdit} style={{ padding: "7px 14px", border: "1.5px solid #e2e8f0", borderRadius: 9, background: "white", cursor: "pointer", fontSize: 12, fontWeight: 700, color: "#64748b", fontFamily: "Nunito,sans-serif" }}>✏️ Editar</button>
-        </div>
-
-        {prem && <QuotaBar profile={profile} />}
-
-        <button onClick={tentarGerarPost} style={{ width: "100%", padding: "18px", background: "#003BA0", color: "white", border: "none", borderRadius: 16, fontSize: 17, fontWeight: 900, cursor: "pointer", fontFamily: "Nunito,sans-serif", boxShadow: "0 6px 20px rgba(0,59,160,0.25)", marginBottom: 16 }}>
-          ✨ Gerar meu post
-        </button>
-
-        <div style={{ background: "#E6EEF9", borderRadius: 18, padding: "22px 20px", border: "1px solid #bfdbfe", marginBottom: 16 }}>
-          <div style={{ fontSize: 17, fontWeight: 900, color: "#0f172a", marginBottom: 6 }}>✅ Cadastro concluído!</div>
-          <div style={{ fontSize: 13.5, color: "#334155", lineHeight: 1.55 }}>
-            Seu perfil foi salvo com sucesso. A geração de posts (texto + imagem) é a próxima etapa que vamos montar. Abaixo está um resumo do que nossa IA já sabe sobre o seu negócio:
+          <div style={{ fontWeight: 900, fontSize: 17, lineHeight: 1.1 }}>
+            {profile.nome || "Meu negócio"}
+            <br /><small style={{ fontWeight: 600, fontSize: 12, opacity: 0.9 }}>{profile.segmentoNome || "—"}</small>
+          </div>
+          <div style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: 14 }}>
+            <span onClick={onEdit} style={{ fontSize: 12, fontWeight: 700, cursor: "pointer" }}>⚙️ Editar perfil</span>
+            <span onClick={onEdit} style={{ fontSize: 18, fontWeight: 700, cursor: "pointer" }}>☰</span>
           </div>
         </div>
 
-        <div style={{ background: "white", borderRadius: 16, border: "1px solid #e2e8f0", overflow: "hidden", boxShadow: "0 2px 12px rgba(0,59,160,0.07)" }}>
-          <div style={{ padding: "13px 18px", background: "#E6EEF9", borderBottom: "1px solid #e2e8f0", fontWeight: 800, fontSize: 14 }}>📋 Resumo do seu perfil</div>
-          <div style={{ padding: "16px 18px", display: "flex", flexDirection: "column", gap: 10 }}>
-            <LinhaResumo rotulo="Negócio" valor={profile.nome} />
-            <LinhaResumo rotulo="Segmento" valor={profile.segmentoNome} />
-            <LinhaResumo rotulo="WhatsApp" valor={profile.whatsapp} />
-            <LinhaResumo rotulo="Tom de voz" valor={tons} />
-            <LinhaResumo rotulo="Logo" valor={profile.logo ? "Enviado ✓" : profile.criarLogoDepois ? "Criar depois" : "—"} />
-            <LinhaResumo rotulo="Respostas" valor={qtdResp + " de 10 preenchidas"} />
+        {/* 2. VITRINE */}
+        <div style={{ position: "relative", height: 300, background: "linear-gradient(180deg,#001a6e 0%,#002a8f 55%,#00329c 100%)", overflow: "hidden" }}>
+          <div style={{ color: "#fff", padding: "10px 16px 0", fontWeight: 800, fontSize: 14, position: "relative", zIndex: 6 }}>← Voltar</div>
+          {/* sombra retangular esfumaçada */}
+          <div style={{ position: "absolute", left: "50%", top: "60%", transform: "translate(-50%,-50%)", width: 135, height: 32, borderRadius: 22, background: "rgba(0,6,30,.52)", filter: "blur(15px)", zIndex: 4, animation: "pfFloatShadow 3.6s ease-in-out infinite" }} />
+          {/* logo Post Fácil flutuando */}
+          <div style={{ position: "absolute", left: "50%", top: "30%", transform: "translate(-50%,-34%)", zIndex: 5, animation: "pfFloatLogo 3.6s ease-in-out infinite", filter: "drop-shadow(0 16px 20px rgba(0,8,40,.35))" }}>
+            <PostFacilLogo size={150} />
+          </div>
+          {/* corte branco arredondado (arco) na base */}
+          <div style={{ position: "absolute", left: "-30%", bottom: -2, width: "160%", height: 150, background: "#F0F5FB", borderRadius: "50% 50% 0 0 / 100% 100% 0 0", zIndex: 3 }} />
+        </div>
+        <div style={{ textAlign: "center", color: "#003BA0", fontWeight: 800, fontSize: 18, position: "relative", zIndex: 6, marginTop: -46 }}>Postar nunca foi tão fácil! ✨</div>
+
+        {/* 3. SAUDAÇÃO MOTIVACIONAL (card branco) */}
+        <div style={{ padding: "22px 20px 6px" }}>
+          <div style={{ background: "#fff", borderRadius: 18, padding: "20px 22px", textAlign: "center", boxShadow: "0 4px 16px rgba(0,59,160,0.07)" }}>
+            <h3 style={{ color: "#16323F", fontSize: 20, fontWeight: 900, lineHeight: 1.3 }}>
+              <span style={{ fontSize: 22 }}>{saud.emoji}</span> {saud.titulo}
+              <br />{saud.sub}
+            </h3>
           </div>
         </div>
+
+        {prem && <div style={{ padding: "0 20px" }}><QuotaBar profile={profile} /></div>}
+
+        {/* 4. OS 3 BOTÕES DE CRIAR POST */}
+        <div style={{ background: "#EEF1FA", padding: "14px 20px 8px" }}>
+          {BOTOES_POST.map((b) => (
+            <button key={b.tipo} onClick={() => tentarGerarPost(b.tipo)} style={{ width: "100%", background: "#003BA0", color: "#fff", border: "none", borderRadius: 18, padding: "20px 18px", marginBottom: 16, cursor: "pointer", display: "flex", alignItems: "center", gap: 14, boxShadow: "0 6px 18px rgba(0,59,160,.22)", textAlign: "left", fontFamily: "Nunito,sans-serif" }}>
+              <span style={{ fontSize: 30, flexShrink: 0 }}>{b.ic}</span>
+              <span style={{ flex: 1 }}>
+                <span style={{ display: "block", fontWeight: 900, fontSize: 16, lineHeight: 1.15 }}>{b.tt}</span>
+                <span style={{ display: "block", fontSize: 12, opacity: 0.9, fontWeight: 600, marginTop: 3, lineHeight: 1.3 }}>{b.ds}</span>
+              </span>
+            </button>
+          ))}
+        </div>
+
+        {/* 5. FAIXA "RECURSOS EXTRAS" */}
+        <div style={{ background: "#8FD420", padding: "10px 20px", textAlign: "center", color: "#003BA0", fontWeight: 800, fontSize: 14 }}>
+          Recursos extras para o seu negócio:
+        </div>
+
+        {/* 6 e 7. BANNERS (Catálogo e Logo) — clicáveis */}
+        <div style={{ padding: "16px 20px 8px" }}>
+          <div onClick={() => showToast("🛍️ Catálogo Prático chega em breve!")} style={{ borderRadius: 18, padding: 18, marginBottom: 14, cursor: "pointer", display: "flex", alignItems: "center", gap: 14, color: "#fff", background: "linear-gradient(135deg,#25A244,#1a7a3f)", boxShadow: "0 6px 18px rgba(37,162,68,.25)" }}>
+            <span style={{ fontSize: 30, flexShrink: 0 }}>🛍️</span>
+            <span style={{ flex: 1 }}>
+              <span style={{ display: "block", fontWeight: 900, fontSize: 16, lineHeight: 1.15 }}>Catálogo Prático</span>
+              <span style={{ display: "block", fontSize: 12, opacity: 0.95, fontWeight: 600, marginTop: 3, lineHeight: 1.3 }}>Crie sua vitrine online e mostre seus produtos</span>
+            </span>
+          </div>
+          <div onClick={() => showToast("🎨 Criar Logo chega em breve!")} style={{ borderRadius: 18, padding: 18, marginBottom: 14, cursor: "pointer", display: "flex", alignItems: "center", gap: 14, color: "#fff", background: "linear-gradient(135deg,#8FD420,#5A9E1B)", boxShadow: "0 6px 18px rgba(143,212,32,.28)" }}>
+            <span style={{ fontSize: 30, flexShrink: 0 }}>🎨</span>
+            <span style={{ flex: 1 }}>
+              <span style={{ display: "block", fontWeight: 900, fontSize: 16, lineHeight: 1.15 }}>Criar Logo</span>
+              <span style={{ display: "block", fontSize: 12, opacity: 0.95, fontWeight: 600, marginTop: 3, lineHeight: 1.3 }}>Design profissional e exclusivo pra sua marca</span>
+            </span>
+          </div>
+        </div>
+
+        {/* 8. RODAPÉ */}
+        <div style={{ textAlign: "center", padding: "24px 24px 16px" }}>
+          <div style={{ color: "#16323F", fontSize: 15, fontWeight: 800, lineHeight: 1.4 }}>Seu próximo cliente pode estar<br />esperando seu próximo post.</div>
+          <div style={{ display: "flex", justifyContent: "center", margin: "16px 0 8px" }}><PostFacilLogo size={56} /></div>
+          <div style={{ color: "#003BA0", fontSize: 13, fontWeight: 800 }}>Postar nunca foi tão fácil!</div>
+        </div>
+
+        {/* 9. FAIXA VERDE-LIMÃO FINAL */}
+        <div style={{ background: "#8FD420", height: 8 }} />
       </div>
 
       {showLogoModal && (
@@ -234,15 +310,410 @@ function Dashboard({ profile, onEdit, onLogoAtualizado }) {
           </div>
         </div>
       )}
+
+      {toast && <Toast msg={toast} />}
     </div>
   );
 }
 
-function LinhaResumo({ rotulo, valor }) {
+// ============================================================
+// FLUXO DE GERAÇÃO DE POST  (Seções 3, 4, 5, 9, 10, 11)
+// Máquina de etapas: [campos] → modal Feed/Stories → carregamento
+// → resultado. "Meu Negócio" começa direto no modal.
+// A geração em si (texto+imagem) é a Fase 2 (APIs no servidor);
+// aqui montamos o fluxo completo com um resultado de demonstração.
+// ============================================================
+const GEN_FONT = "Nunito,sans-serif";
+
+function FluxoGeracao({ tipo, profile, onSair }) {
+  const [etapa, setEtapa] = useState(tipo === "negocio" ? "modal" : "campos");
+  const [campos, setCampos] = useState({});
+  const [formato, setFormato] = useState(null);
+  const [resultado, setResultado] = useState(null);
+
+  function gerar(fmt) {
+    const usar = fmt || formato;
+    setFormato(usar);
+    setEtapa("loading");
+    // Fase 2: chamar o backend (arquitetura de Fluxo_Geracao_Post_REFERENCIA.md).
+    setTimeout(() => {
+      setResultado(montarResultadoDemo({ tipo, profile, campos }));
+      incPostCreditos(profile);
+      setEtapa("resultado");
+    }, 2800);
+  }
+
+  function fecharModal() {
+    if (tipo === "negocio") onSair();
+    else setEtapa("campos");
+  }
+
+  function novaVersao() {
+    if (!podeGerarPost(profile)) return; // após os 92 do mês, aguardar recarga
+    gerar(formato);
+  }
+
+  if (etapa === "campos" && tipo === "promocao")
+    return <CamposPromocao valores={campos} onVoltar={onSair} onGerar={(c) => { setCampos(c); setEtapa("modal"); }} />;
+  if (etapa === "campos" && tipo === "produto")
+    return <CamposProduto valores={campos} onVoltar={onSair} onGerar={(c) => { setCampos(c); setEtapa("modal"); }} />;
+  if (etapa === "loading")
+    return <TelaCarregamento />;
+  if (etapa === "resultado")
+    return <TelaResultado tipo={tipo} profile={profile} campos={campos} formato={formato} resultado={resultado} onNovaVersao={novaVersao} onSair={onSair} />;
+  // etapa "modal"
   return (
-    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, paddingBottom: 8, borderBottom: "1px solid #f1f5f9" }}>
-      <span style={{ fontSize: 13, fontWeight: 700, color: "#64748b" }}>{rotulo}</span>
-      <span style={{ fontSize: 13.5, fontWeight: 700, color: "#0f172a", textAlign: "right", maxWidth: "62%" }}>{valor || "—"}</span>
+    <div style={{ minHeight: "100vh", background: "#EEF1FA", fontFamily: GEN_FONT, display: "flex", justifyContent: "center" }}>
+      <div style={{ width: "100%", maxWidth: 430, background: "#F0F5FB", minHeight: "100vh" }} />
+      <ModalFeedStories onEscolher={(f) => gerar(f)} onFechar={fecharModal} />
+    </div>
+  );
+}
+
+// resultado de demonstração (Fase 2 substitui pela geração real)
+function montarResultadoDemo({ tipo, profile, campos }) {
+  const nomeNeg = profile.nome || "seu negócio";
+  const seg = profile.segmentoNome || "";
+  let legenda, destaque, sub;
+  if (tipo === "promocao") {
+    destaque = (campos.promocao || "Oferta especial").toUpperCase();
+    sub = campos.prazo ? `🔥 ${campos.prazo}` : "🔥 Aproveite!";
+    legenda = `${campos.promocao || "Promoção especial"}! ${campos.prazo ? campos.prazo + ". " : ""}${campos.condicao ? campos.condicao + ". " : ""}Corre que é por tempo limitado aqui na ${nomeNeg}! 🔥`;
+  } else if (tipo === "produto") {
+    destaque = (campos.produtoNome || campos.produto || nomeNeg).toUpperCase();
+    sub = "✨ Novidade!";
+    legenda = `${campos.produtoNome ? campos.produtoNome + ": " : ""}${campos.produto || "nosso produto"} feito com carinho pra você! ${campos.info ? campos.info + ". " : ""}Vem conferir na ${nomeNeg}. 😍`;
+  } else {
+    destaque = nomeNeg.toUpperCase();
+    sub = "💙 Feito pra você";
+    legenda = `Na ${nomeNeg} a gente capricha em cada detalhe pra você! Qualidade e carinho em tudo que fazemos. Conta com a gente. 💙`;
+  }
+  const tag = (s) => "#" + (s || "").normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase().replace(/[^a-z0-9]/g, "");
+  const hashtags = [tag(seg), tag(nomeNeg), "#post", "#instagram"].filter((h) => h.length > 1).join(" ");
+  // Diretriz 2: alternar a posição do logo entre execuções
+  const cantos = ["tl", "tr", "bl", "br"];
+  const canto = cantos[Math.floor(Math.random() * cantos.length)];
+  return { legenda, hashtags, destaque, sub, canto };
+}
+
+// ---- Recurso de mídia compartilhado (Seção 11) ----
+function MediaUpload({ midia, onMidia }) {
+  const ref = useRef(null);
+  function escolher(e) {
+    const f = e.target.files?.[0];
+    if (!f) return;
+    const isVideo = (f.type || "").startsWith("video");
+    const r = new FileReader();
+    r.onload = () => onMidia({ url: r.result, isVideo });
+    r.readAsDataURL(f);
+  }
+  return (
+    <div>
+      {midia ? (
+        <div style={{ textAlign: "center" }}>
+          <div style={{ width: 150, height: 150, borderRadius: 16, margin: "0 auto", overflow: "hidden", boxShadow: "0 6px 18px rgba(0,0,0,.2)", background: "#000", display: "flex", alignItems: "center", justifyContent: "center" }}>
+            {midia.isVideo
+              ? <video src={midia.url} style={{ width: "100%", height: "100%", objectFit: "cover" }} muted playsInline />
+              : <img src={midia.url} alt="mídia" style={{ width: "100%", height: "100%", objectFit: "cover" }} />}
+          </div>
+          <span onClick={() => ref.current?.click()} style={{ color: "#003BA0", fontWeight: 800, fontSize: 13, marginTop: 12, cursor: "pointer", display: "inline-block" }}>🔄 Trocar mídia</span>
+        </div>
+      ) : (
+        <div onClick={() => ref.current?.click()} style={{ border: "2px dashed #003BA0", borderRadius: 18, padding: "34px 16px", textAlign: "center", background: "#EAF1FB", cursor: "pointer" }}>
+          <div style={{ fontSize: 44 }}>📤</div>
+          <div style={{ color: "#003BA0", fontWeight: 900, fontSize: 16, marginTop: 10 }}>Toque para adicionar</div>
+          <div style={{ color: "#5C7686", fontSize: 12, marginTop: 6, lineHeight: 1.4 }}>Foto ou vídeo do seu celular</div>
+        </div>
+      )}
+      <input ref={ref} type="file" accept="image/*,video/*" onChange={escolher} style={{ display: "none" }} />
+    </div>
+  );
+}
+
+// pedaços de formulário reutilizados nas telas de campos
+function VoltarLimpo({ onClick }) {
+  return <div onClick={onClick} style={{ color: "#003BA0", padding: "14px 16px 0", fontWeight: 800, fontSize: 14, cursor: "pointer" }}>← Voltar</div>;
+}
+function CampoTexto({ label, opcional, ajuda, valor, onChange, placeholder }) {
+  return (
+    <div style={{ marginBottom: 38 }}>
+      <span style={{ fontSize: 15, fontWeight: 900, color: "#16323F", marginBottom: 4, display: "block" }}>
+        {label} {opcional && <span style={{ fontSize: 12, fontWeight: 700, color: "#8Fb14d" }}>(Opcional)</span>}
+      </span>
+      <span style={{ fontSize: 13, fontWeight: 700, color: "#003BA0", margin: "4px 0 10px", display: "block", lineHeight: 1.4 }}>{ajuda}</span>
+      <input type="text" value={valor} onChange={(e) => onChange(e.target.value)} placeholder={placeholder}
+        style={{ width: "100%", boxSizing: "border-box", padding: 14, border: "1.5px solid #cdd9ea", borderRadius: 14, fontSize: 15, fontFamily: GEN_FONT, color: "#16323F", background: "#fff", outline: "none" }} />
+    </div>
+  );
+}
+function BtnCriarPost({ onClick, desabilitado }) {
+  return (
+    <div style={{ margin: "12px 20px 0" }}>
+      <button onClick={onClick} disabled={desabilitado}
+        style={{ width: "100%", background: desabilitado ? "#C2D2DB" : "#003BA0", color: "#fff", border: "none", padding: 18, borderRadius: 16, fontWeight: 900, fontSize: 17, cursor: desabilitado ? "default" : "pointer", boxShadow: desabilitado ? "none" : "0 6px 18px rgba(0,59,160,.3)", fontFamily: GEN_FONT, display: "flex", alignItems: "center", justifyContent: "center", gap: 8 }}>
+        ✨ Criar meu post
+      </button>
+    </div>
+  );
+}
+
+// ---- Tela de campos: PROMOÇÃO (Seção 9) ----
+function CamposPromocao({ valores, onVoltar, onGerar }) {
+  const [promocao, setPromocao] = useState(valores.promocao || "");
+  const [prazo, setPrazo] = useState(valores.prazo || "");
+  const [condicao, setCondicao] = useState(valores.condicao || "");
+  const [querMidia, setQuerMidia] = useState(valores.querMidia || false);
+  const [midia, setMidia] = useState(valores.midia || null);
+  const pode = promocao.trim() && prazo.trim();
+
+  const opt = (sel) => ({ flex: 1, textAlign: "center", padding: 13, border: "1.5px solid " + (sel ? "#003BA0" : "#cdd9ea"), borderRadius: 14, fontSize: 14, fontWeight: 800, color: sel ? "#fff" : "#5C7686", cursor: "pointer", background: sel ? "#003BA0" : "#fff" });
+
+  return (
+    <div style={{ minHeight: "100vh", background: "#EEF1FA", fontFamily: GEN_FONT, display: "flex", justifyContent: "center" }}>
+      <div style={{ width: "100%", maxWidth: 430, background: "#F0F5FB", minHeight: "100vh", paddingBottom: 40 }}>
+        <VoltarLimpo onClick={onVoltar} />
+        <div style={{ textAlign: "center", padding: 24, minHeight: 300, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center" }}>
+          <h2 style={{ color: "#003BA0", fontSize: 26, fontWeight: 900, lineHeight: 1.3 }}>Pra sua promoção ficar<br />do seu jeito 😊</h2>
+          <p style={{ color: "#5A9E1B", fontSize: 15, fontWeight: 800, marginTop: 32, lineHeight: 1.6 }}>Responda essas 4 perguntinhas,<br />é bem rapidinho!</p>
+        </div>
+        <div style={{ padding: "6px 20px 8px" }}>
+          <CampoTexto label="Qual promoção você tem em mente?" ajuda="Exemplo: Compre 1 leve 2, Toda loja com até 50% de desconto..." valor={promocao} onChange={setPromocao} placeholder="Escreva sua promoção aqui" />
+          <CampoTexto label="Até quando vale a promoção?" ajuda="Exemplo: Só hoje, até domingo, enquanto durar os estoques..." valor={prazo} onChange={setPrazo} placeholder="Escreva o prazo aqui" />
+          <CampoTexto label="Tem alguma condição?" opcional ajuda="Exemplo: Só no delivery, somente pagamento à vista..." valor={condicao} onChange={setCondicao} placeholder="Escreva a condição (se tiver)" />
+          <div style={{ marginBottom: 38 }}>
+            <span style={{ fontSize: 15, fontWeight: 900, color: "#16323F", marginBottom: 4, display: "block" }}>Quer enviar uma foto ou vídeo do produto em promoção?</span>
+            <div style={{ display: "flex", gap: 10, marginTop: 8 }}>
+              <div onClick={() => setQuerMidia(true)} style={opt(querMidia)}>Sim</div>
+              <div onClick={() => { setQuerMidia(false); setMidia(null); }} style={opt(!querMidia)}>Não precisa</div>
+            </div>
+            {querMidia && <div style={{ marginTop: 14 }}><MediaUpload midia={midia} onMidia={setMidia} /></div>}
+          </div>
+        </div>
+        <BtnCriarPost desabilitado={!pode} onClick={() => onGerar({ promocao, prazo, condicao, querMidia, midia })} />
+      </div>
+    </div>
+  );
+}
+
+// ---- Tela de campos: MEU PRODUTO (Seção 10) — mídia primeiro ----
+function CamposProduto({ valores, onVoltar, onGerar }) {
+  const [midia, setMidia] = useState(valores.midia || null);
+  const [produto, setProduto] = useState(valores.produto || "");
+  const [produtoNome, setProdutoNome] = useState(valores.produtoNome || "");
+  const [info, setInfo] = useState(valores.info || "");
+  const pode = produto.trim() && midia;
+
+  return (
+    <div style={{ minHeight: "100vh", background: "#EEF1FA", fontFamily: GEN_FONT, display: "flex", justifyContent: "center" }}>
+      <div style={{ width: "100%", maxWidth: 430, background: "#F0F5FB", minHeight: "100vh", paddingBottom: 40 }}>
+        <VoltarLimpo onClick={onVoltar} />
+        <div style={{ textAlign: "center", padding: 24, minHeight: 230, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center" }}>
+          <h2 style={{ color: "#003BA0", fontSize: 26, fontWeight: 900, lineHeight: 1.3 }}>Vamos criar um post<br />com o seu produto! 📸</h2>
+          <p style={{ color: "#5A9E1B", fontSize: 15, fontWeight: 800, marginTop: 26, lineHeight: 1.6 }}>É rapidinho: mande a mídia<br />e responda 2 perguntinhas!</p>
+        </div>
+        <div style={{ padding: "6px 20px 8px" }}>
+          <div style={{ marginBottom: 38 }}>
+            <div style={{ fontSize: 16, fontWeight: 900, color: "#16323F", textAlign: "center", marginBottom: 14 }}>Envie a foto ou vídeo do seu produto</div>
+            <MediaUpload midia={midia} onMidia={setMidia} />
+          </div>
+          <CampoTexto label="O que é o produto?" ajuda="Exemplo: Torta de chocolate com recheio de coco. / Tênis esportivo..." valor={produto} onChange={setProduto} placeholder="Descreva seu produto" />
+          <CampoTexto label="Qual o nome do produto?" opcional ajuda="Exemplo: Torta Prestígio / NIKE Shot" valor={produtoNome} onChange={setProdutoNome} placeholder="Nome do produto (se tiver)" />
+          <CampoTexto label="Tem algo que você gostaria de informar no post?" opcional ajuda="Exemplo: Aceitamos encomendas / 10X sem juros no cartão..." valor={info} onChange={setInfo} placeholder="Escreva aqui (se tiver)" />
+        </div>
+        <BtnCriarPost desabilitado={!pode} onClick={() => onGerar({ produto, produtoNome, info, midia })} />
+      </div>
+    </div>
+  );
+}
+
+// ---- Modal "Feed ou Stories?" (Seção 3) — formatos visuais reais ----
+function ModalFeedStories({ onEscolher, onFechar }) {
+  return (
+    <div onClick={(e) => { if (e.target === e.currentTarget) onFechar(); }}
+      style={{ position: "fixed", inset: 0, background: "rgba(0,20,60,.55)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1000, padding: 20, fontFamily: GEN_FONT }}>
+      <div style={{ background: "#fff", borderRadius: 22, padding: "28px 22px", width: "100%", maxWidth: 350, textAlign: "center", position: "relative" }}>
+        <span onClick={onFechar} style={{ position: "absolute", top: 14, right: 18, fontSize: 22, color: "#5C7686", cursor: "pointer", fontWeight: 700 }}>✕</span>
+        <h3 style={{ color: "#003BA0", fontSize: 20, fontWeight: 900, marginBottom: 6 }}>Onde você vai postar?</h3>
+        <div style={{ color: "#5C7686", fontSize: 12, marginBottom: 22 }}>Escolha o formato do seu post</div>
+        <div style={{ display: "flex", gap: 16, alignItems: "flex-end", justifyContent: "center" }}>
+          <div onClick={() => onEscolher("feed")} style={{ cursor: "pointer", display: "flex", flexDirection: "column", alignItems: "center", gap: 10 }}>
+            <div style={{ width: 96, height: 120, borderRadius: 10, boxShadow: "0 4px 12px rgba(0,0,0,.18)", display: "flex", alignItems: "center", justifyContent: "center", color: "#fff", fontWeight: 900, fontSize: 11, background: "linear-gradient(135deg,#f09433,#dc2743,#bc1888)" }}>4:5</div>
+            <div style={{ fontWeight: 900, color: "#003BA0", fontSize: 15 }}>Feed</div>
+            <div style={{ fontSize: 11, color: "#5C7686", marginTop: -6 }}>quadrado alto</div>
+          </div>
+          <div onClick={() => onEscolher("stories")} style={{ cursor: "pointer", display: "flex", flexDirection: "column", alignItems: "center", gap: 10 }}>
+            <div style={{ width: 75, height: 133, borderRadius: 10, boxShadow: "0 4px 12px rgba(0,0,0,.18)", display: "flex", alignItems: "center", justifyContent: "center", color: "#fff", fontWeight: 900, fontSize: 11, background: "linear-gradient(135deg,#003BA0,#0066ff)" }}>9:16</div>
+            <div style={{ fontWeight: 900, color: "#003BA0", fontSize: 15 }}>Stories</div>
+            <div style={{ fontSize: 11, color: "#5C7686", marginTop: -6 }}>tela cheia</div>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ---- Tela de carregamento (Seção 4.1) — SEM "IA" ----
+const MSGS_CARREGANDO = [
+  "Estamos criando o seu post...",
+  "Preparando algo especial pro seu negócio...",
+  "Cuidando de cada detalhe pra você...",
+  "Montando seu post com a cara da sua marca...",
+  "Deixando tudo pronto pra você postar...",
+];
+function TelaCarregamento() {
+  const [i, setI] = useState(0);
+  useEffect(() => {
+    const t = setInterval(() => setI((x) => (x + 1) % MSGS_CARREGANDO.length), 1600);
+    return () => clearInterval(t);
+  }, []);
+  return (
+    <div style={{ minHeight: "100vh", background: "#F0F5FB", fontFamily: GEN_FONT, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", padding: 24 }}>
+      <style>{`
+        @keyframes pfLoadFloat { 0%,100%{transform:translateY(0);} 50%{transform:translateY(-14px);} }
+        @keyframes pfLoadGlow { 0%,100%{filter:drop-shadow(0 8px 10px rgba(150,205,255,.35));} 50%{filter:drop-shadow(0 16px 26px rgba(150,205,255,.75));} }
+      `}</style>
+      <div style={{ animation: "pfLoadFloat 3.6s ease-in-out infinite" }}>
+        <div style={{ animation: "pfLoadGlow 2.4s ease-in-out infinite" }}>
+          <PostFacilLogo size={120} />
+        </div>
+      </div>
+      <div style={{ marginTop: 36, color: "#003BA0", fontWeight: 800, fontSize: 17, textAlign: "center", maxWidth: 300, minHeight: 48 }}>
+        {MSGS_CARREGANDO[i]}
+      </div>
+    </div>
+  );
+}
+
+// ---- Tela de resultado (Seção 5) + card WhatsApp (Seção 7) ----
+function TelaResultado({ tipo, profile, campos, formato, resultado, onNovaVersao, onSair }) {
+  const [toast, showToast] = useToast();
+  const r = resultado || {};
+  const aspect = formato === "stories" ? "9 / 16" : "4 / 5";
+  const midia = campos?.midia;
+  const cantoPos = {
+    tl: { top: 12, left: 12 }, tr: { top: 12, right: 12 },
+    bl: { bottom: 12, left: 12 }, br: { bottom: 12, right: 12 },
+  }[r.canto || "br"];
+
+  function copiar() {
+    doCopy(`${r.legenda}\n\n${r.hashtags}`, () => showToast("📋 Legenda copiada!"), () => showToast("Não consegui copiar 😕"));
+  }
+  function baixar() {
+    showToast("⬇️ Download disponível na versão final ✨");
+  }
+
+  return (
+    <div style={{ minHeight: "100vh", background: "#EEF1FA", fontFamily: GEN_FONT, display: "flex", justifyContent: "center" }}>
+      <div style={{ width: "100%", maxWidth: 430, background: "#F0F5FB", minHeight: "100vh", paddingTop: 10, paddingBottom: 40 }}>
+        <div style={{ padding: "8px 16px 0" }}>
+          <span onClick={onSair} style={{ color: "#003BA0", fontWeight: 800, fontSize: 14, cursor: "pointer" }}>← Início</span>
+        </div>
+
+        {/* título */}
+        <div style={{ textAlign: "center", padding: "16px 16px 0" }}>
+          <h2 style={{ color: "#003BA0", fontSize: 24, fontWeight: 900 }}>Seu post está pronto! 🎉</h2>
+          <p style={{ color: "#5C7686", fontSize: 13, marginTop: 4 }}>Feito com a cara da sua marca</p>
+        </div>
+
+        {/* card do post */}
+        <div style={{ margin: "18px 20px", background: "#fff", borderRadius: 18, boxShadow: "0 6px 20px rgba(0,59,160,.12)", overflow: "hidden" }}>
+          <div style={{ width: "100%", aspectRatio: aspect, background: "linear-gradient(135deg,#ffd89b,#ff6b6b 60%,#c0392b)", position: "relative", overflow: "hidden" }}>
+            {midia && (midia.isVideo
+              ? <video src={midia.url} style={{ position: "absolute", inset: 0, width: "100%", height: "100%", objectFit: "cover" }} muted playsInline />
+              : <img src={midia.url} alt="" style={{ position: "absolute", inset: 0, width: "100%", height: "100%", objectFit: "cover" }} />)}
+            <div style={{ position: "absolute", inset: 0, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", color: "#fff", textAlign: "center", padding: 20, background: midia ? "rgba(0,0,0,.28)" : "transparent" }}>
+              <div style={{ fontSize: 34, fontWeight: 900, textShadow: "0 2px 8px rgba(0,0,0,.4)", lineHeight: 1.05 }}>{r.destaque}</div>
+              <div style={{ fontSize: 15, fontWeight: 700, marginTop: 10, background: "rgba(0,0,0,.25)", padding: "5px 14px", borderRadius: 20 }}>{r.sub}</div>
+            </div>
+            {profile.logo && (
+              <div style={{ position: "absolute", ...cantoPos, width: 46, height: 46, borderRadius: 10, background: "#fff", padding: 4, boxSizing: "border-box", boxShadow: "0 2px 8px rgba(0,0,0,.25)" }}>
+                <img src={profile.logo} alt="logo" style={{ width: "100%", height: "100%", objectFit: "contain" }} />
+              </div>
+            )}
+          </div>
+          <div style={{ padding: 16, fontSize: 13, color: "#16323F", lineHeight: 1.6, borderTop: "1px solid #eef" }}>
+            {r.legenda}
+            <span style={{ color: "#003BA0", fontWeight: 700, marginTop: 8, display: "block", fontSize: 12 }}>{r.hashtags}</span>
+          </div>
+        </div>
+
+        {/* ações principais */}
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, margin: "24px 20px 0" }}>
+          <button onClick={copiar} style={{ padding: 15, borderRadius: 14, fontWeight: 800, fontSize: 13, border: "none", cursor: "pointer", background: "#003BA0", color: "#fff", boxShadow: "0 3px 10px rgba(0,59,160,.25)", fontFamily: GEN_FONT }}>📋 Copiar legenda</button>
+          <button onClick={baixar} style={{ padding: 15, borderRadius: 14, fontWeight: 800, fontSize: 13, border: "none", cursor: "pointer", background: "#003BA0", color: "#fff", boxShadow: "0 3px 10px rgba(0,59,160,.25)", fontFamily: GEN_FONT }}>⬇️ Baixar imagem</button>
+        </div>
+
+        {/* gerar outra versão + contador */}
+        <div style={{ textAlign: "center", margin: "28px 20px 0" }}>
+          <span onClick={onNovaVersao} style={{ color: "#003BA0", fontWeight: 800, fontSize: 15, cursor: "pointer" }}>🔄 Gerar outra versão</span>
+          <span style={{ display: "block", marginTop: 8, color: "#5C7686", fontSize: 12, fontWeight: 600, lineHeight: 1.5, padding: "0 6px" }}>{mensagemCreditos(profile)}</span>
+        </div>
+
+        {/* card do WhatsApp */}
+        <CardWhatsApp profile={profile} />
+
+        {toast && <Toast msg={toast} />}
+      </div>
+    </div>
+  );
+}
+
+// ---- Card do envio diário no WhatsApp (Seção 7) ----
+function CardWhatsApp({ profile }) {
+  const [cfg, setCfg] = useState(() => getWppConfig(profile));
+  const [modo, setModo] = useState(() => (getWppConfig(profile).ativo ? "selo" : "convite")); // convite | ajustes | selo
+  const [hora, setHora] = useState(cfg.hora || "09:00");
+  const [formato, setFormato] = useState(cfg.formato || "alternar");
+
+  const fopt = (val, sel) => ({ flex: 1, textAlign: "center", padding: "15px 4px", border: "1.5px solid " + (sel ? "#25A244" : "#cde9a0"), borderRadius: 12, fontSize: 12, fontWeight: 800, color: sel ? "#fff" : "#5C7686", cursor: "pointer", background: sel ? "#25A244" : "#fff", lineHeight: 1.3 });
+  const labelFormato = { sempreFeed: "Sempre Feed", sempreStories: "Sempre Stories", alternar: "Alternando Feed/Stories" };
+
+  function confirmar() {
+    const novo = { ativo: true, hora, formato };
+    saveWppConfig(profile, novo);
+    setCfg(novo);
+    setModo("selo");
+  }
+
+  if (modo === "selo") {
+    return (
+      <div onClick={() => setModo("ajustes")} style={{ margin: "40px 20px 0", background: "#e9f9ee", border: "1px solid #25A244", borderRadius: 14, padding: "14px 16px", fontSize: 13, color: "#1a7a3f", fontWeight: 800, textAlign: "center", cursor: "pointer" }}>
+        ✅ Envio diário ativo às {cfg.hora} · {labelFormato[cfg.formato] || "Alternando Feed/Stories"}
+        <span style={{ display: "block", fontWeight: 600, fontSize: 11, marginTop: 2 }}>toque para ajustar</span>
+      </div>
+    );
+  }
+
+  return (
+    <div style={{ margin: "40px 20px 0", background: "#fff", borderRadius: 22, padding: "34px 24px 28px", textAlign: "center", boxShadow: "0 8px 28px rgba(0,0,0,.10)" }}>
+      <style>{`@keyframes wavedown{0%,100%{transform:translateY(0) rotate(-6deg);}50%{transform:translateY(-10px) rotate(6deg);}}`}</style>
+      <div style={{ fontSize: 60, marginBottom: 12 }}>💬📅</div>
+      <h3 style={{ fontSize: 24, color: "#16323F", fontWeight: 900, lineHeight: 1.18, marginBottom: 14, letterSpacing: ".3px" }}>RECEBA SEU POST<br />AUTOMATICAMENTE</h3>
+      <div style={{ fontSize: 20, color: "#16323F", fontWeight: 800, lineHeight: 1.3, marginBottom: 6 }}>Todo dia, com<br />hora marcada!</div>
+      <div style={{ fontSize: 18, color: "#25A244", fontWeight: 900, marginBottom: 16 }}>via WhatsApp</div>
+
+      {modo === "convite" ? (
+        <div style={{ position: "relative", paddingTop: 34 }}>
+          <span style={{ position: "absolute", left: 18, top: -6, fontSize: 46, transformOrigin: "50% 90%", animation: "wavedown 1s ease-in-out infinite", pointerEvents: "none", zIndex: 2 }}>👇</span>
+          <button onClick={() => setModo("ajustes")} style={{ width: "100%", background: "#25A244", color: "#fff", border: "none", padding: 22, borderRadius: 16, fontWeight: 900, fontSize: 22, cursor: "pointer", boxShadow: "0 6px 18px rgba(37,162,68,.4)", fontFamily: GEN_FONT }}>Clique aqui</button>
+        </div>
+      ) : (
+        <div style={{ marginTop: 24, paddingTop: 22, borderTop: "1px dashed #ccc", textAlign: "left" }}>
+          <div style={{ marginBottom: 18 }}>
+            <label style={{ display: "block", fontSize: 14, fontWeight: 800, color: "#16323F", marginBottom: 10, textAlign: "center" }}>⏰ Que horas quer receber?</label>
+            <input type="time" value={hora} onChange={(e) => setHora(e.target.value)} style={{ width: "100%", boxSizing: "border-box", padding: 14, border: "1.5px solid #cde9a0", borderRadius: 12, fontSize: 16, fontFamily: GEN_FONT, textAlign: "center" }} />
+          </div>
+          <div style={{ marginBottom: 18 }}>
+            <label style={{ display: "block", fontSize: 14, fontWeight: 800, color: "#16323F", marginBottom: 10, textAlign: "center" }}>📱 Qual formato prefere postar?</label>
+            <div style={{ display: "flex", gap: 8 }}>
+              <div onClick={() => setFormato("sempreFeed")} style={fopt("sempreFeed", formato === "sempreFeed")}>Sempre<br />Feed</div>
+              <div onClick={() => setFormato("sempreStories")} style={fopt("sempreStories", formato === "sempreStories")}>Sempre<br />Stories</div>
+              <div onClick={() => setFormato("alternar")} style={fopt("alternar", formato === "alternar")}>Alternar<br /><span style={{ fontWeight: 600, fontSize: 10 }}>Feed ou Stories</span></div>
+            </div>
+          </div>
+          <button onClick={confirmar} style={{ width: "100%", background: "#25A244", color: "#fff", border: "none", padding: 16, borderRadius: 14, fontWeight: 900, fontSize: 15, cursor: "pointer", marginTop: 6, fontFamily: GEN_FONT }}>Confirmar e ativar 🎉</button>
+        </div>
+      )}
     </div>
   );
 }
@@ -277,6 +748,7 @@ function EditarPerfil({ profile, onSalvar, onVoltar }) {
   const tipoData = DADOS[tipo] || {};
   const temCategorias = !!tipoData.categorias;
 
+  const [nomePessoa, setNomePessoa] = useState(profile.nomePessoa || "");
   const [nome,     setNome]     = useState(profile.nome || "");
   const [whatsapp, setWhatsapp] = useState(profile.whatsapp || "");
   const [tons,     setTons]     = useState(profile.tons || []);
@@ -347,6 +819,7 @@ function EditarPerfil({ profile, onSalvar, onVoltar }) {
   function salvar() {
     onSalvar({
       ...profile,
+      nomePessoa: nomePessoa.trim(),
       nome: nome.trim(),
       whatsapp,
       tons,
@@ -372,6 +845,10 @@ function EditarPerfil({ profile, onSalvar, onVoltar }) {
 
         {/* DADOS */}
         {secH("Dados")}
+        <div style={{ marginBottom: 14 }}>
+          {rot("Como podemos te chamar?")}
+          <input value={nomePessoa} onChange={e => setNomePessoa(e.target.value)} placeholder="Seu primeiro nome" style={inp} />
+        </div>
         <div style={{ marginBottom: 14 }}>
           {rot("Nome do negócio")}
           <input value={nome} onChange={e => setNome(e.target.value)} style={inp} />

@@ -34,14 +34,14 @@ export default function Onboarding({ onConcluir, onIrParaDashboard, onVoltar }) 
   const [segmento, setSegmento] = useState(null);
   // cadastro acumula todos os dados do cliente
   const [cadastro, setCadastro] = useState({
-    nome: "", whatsapp: "", tons: [], logo: null, criarLogoDepois: false, respostas: {},
+    nome: "", nomePessoa: "", whatsapp: "", tons: [], logo: null, criarLogoDepois: false, respostas: {},
   });
 
   const ehPessoal = tipo ? !!DADOS[tipo].direto : false;
 
   function reset() {
     setTipo(null); setSegmento(null);
-    setCadastro({ nome: "", whatsapp: "", tons: [], logo: null, criarLogoDepois: false, respostas: {} });
+    setCadastro({ nome: "", nomePessoa: "", whatsapp: "", tons: [], logo: null, criarLogoDepois: false, respostas: {} });
     setTela("tipo");
   }
   function escolherTipo(t) {
@@ -57,6 +57,7 @@ export default function Onboarding({ onConcluir, onIrParaDashboard, onVoltar }) 
       segmentoId: segmento.id,
       segmentoNome: segmento.nome,
       nome: cadastro.nome,
+      nomePessoa: cadastro.nomePessoa,
       whatsapp: cadastro.whatsapp,
       tons: cadastro.tons,
       logo: cadastro.logo,
@@ -390,6 +391,7 @@ function TelaFim({ tipoInfo, segmento, cadastro, onCriarLogo, onReiniciar, onIrP
 /* ===========  TELA 3 — NOME + WHATSAPP  =========== */
 function TelaIdentificacao({ tipoInfo, ehPessoal, valores, onVoltar, onAvancar }) {
   const cor = tipoInfo.cor;
+  const [nomePessoa, setNomePessoa] = useState(valores.nomePessoa || "");
   const [nome, setNome] = useState(valores.nome || "");
   const [zap, setZap] = useState(valores.whatsapp || "");
 
@@ -401,7 +403,8 @@ function TelaIdentificacao({ tipoInfo, ehPessoal, valores, onVoltar, onAvancar }
   }
   const zapValido = zap.replace(/\D/g, "").length >= 10;
   const nomeValido = nome.trim().length >= 2;
-  const podeAvancar = nomeValido && zapValido;
+  const nomePessoaValido = nomePessoa.trim().length >= 2;
+  const podeAvancar = nomePessoaValido && nomeValido && zapValido;
 
   const rotuloNome = ehPessoal
     ? "Qual é o seu nome ou o nome da sua página?"
@@ -420,6 +423,11 @@ function TelaIdentificacao({ tipoInfo, ehPessoal, valores, onVoltar, onAvancar }
       <PassoIndicador atual={1} cor={cor} />
       <Topo titulo="Vamos nos conhecer 👋" sub="Esses dados aparecem nos seus posts e no botão de contato." cor={cor} />
       <div style={{ marginTop: 22, animation: "fadeUp .35s ease both" }}>
+        <Rotulo>Como podemos te chamar?</Rotulo>
+        <input value={nomePessoa} onChange={(e) => setNomePessoa(e.target.value)} placeholder="Seu primeiro nome…" style={inp(cor)}
+          onFocus={(e) => (e.target.style.borderColor = cor)} onBlur={(e) => (e.target.style.borderColor = C.line)} />
+        <Ajuda>É assim que a gente vai te cumprimentar aqui no app. 😊</Ajuda>
+        <div style={{ height: 18 }} />
         <Rotulo>{rotuloNome}</Rotulo>
         <input value={nome} onChange={(e) => setNome(e.target.value)} placeholder="Digite aqui…" style={inp(cor)}
           onFocus={(e) => (e.target.style.borderColor = cor)} onBlur={(e) => (e.target.style.borderColor = C.line)} />
@@ -430,7 +438,7 @@ function TelaIdentificacao({ tipoInfo, ehPessoal, valores, onVoltar, onAvancar }
           onFocus={(e) => (e.target.style.borderColor = cor)} onBlur={(e) => (e.target.style.borderColor = C.line)} />
         <Ajuda>É pra onde seus clientes vão falar com você quando virem os posts. 💬</Ajuda>
       </div>
-      <BotaoPrincipal cor={cor} desabilitado={!podeAvancar} onClick={() => onAvancar({ nome: nome.trim(), whatsapp: zap })}>
+      <BotaoPrincipal cor={cor} desabilitado={!podeAvancar} onClick={() => onAvancar({ nomePessoa: nomePessoa.trim(), nome: nome.trim(), whatsapp: zap })}>
         Continuar →
       </BotaoPrincipal>
       <Estilos />
