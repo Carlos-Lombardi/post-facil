@@ -11,6 +11,9 @@ import {
   saudacaoMotivacional, incPostCreditos, mensagemCreditos, podeGerarPost,
   getWppConfig, saveWppConfig, doCopy,
 } from "./shared.jsx";
+import logoPostFacil from "./assets/logo-postfacil.png";
+import bannerCatalogo from "./assets/banner-catalogo.jpg";
+import bannerLogo from "./assets/banner-logo.jpg";
 
 // ============================================================
 // LANDING
@@ -216,7 +219,7 @@ function Dashboard({ profile, onEdit, onLogoAtualizado }) {
           <div style={{ position: "absolute", left: "50%", top: "60%", transform: "translate(-50%,-50%)", width: 135, height: 32, borderRadius: 22, background: "rgba(0,6,30,.52)", filter: "blur(15px)", zIndex: 4, animation: "pfFloatShadow 3.6s ease-in-out infinite" }} />
           {/* logo Post Fácil flutuando */}
           <div style={{ position: "absolute", left: "50%", top: "30%", transform: "translate(-50%,-34%)", zIndex: 5, animation: "pfFloatLogo 3.6s ease-in-out infinite", filter: "drop-shadow(0 16px 20px rgba(0,8,40,.35))" }}>
-            <PostFacilLogo size={150} />
+            <img src={logoPostFacil} alt="Post Fácil" style={{ width: 200, height: 200, objectFit: "contain", display: "block" }} />
           </div>
           {/* corte branco arredondado (arco) na base */}
           <div style={{ position: "absolute", left: "-30%", bottom: -2, width: "160%", height: 150, background: "#F0F5FB", borderRadius: "50% 50% 0 0 / 100% 100% 0 0", zIndex: 3 }} />
@@ -224,27 +227,27 @@ function Dashboard({ profile, onEdit, onLogoAtualizado }) {
         <div style={{ textAlign: "center", color: "#003BA0", fontWeight: 800, fontSize: 18, position: "relative", zIndex: 6, marginTop: -46 }}>Postar nunca foi tão fácil! ✨</div>
 
         {/* 3. SAUDAÇÃO MOTIVACIONAL (card branco) */}
-        <div style={{ padding: "22px 20px 6px" }}>
-          <div style={{ background: "#fff", borderRadius: 18, padding: "20px 22px", textAlign: "center", boxShadow: "0 4px 16px rgba(0,59,160,0.07)" }}>
-            <h3 style={{ color: "#16323F", fontSize: 20, fontWeight: 900, lineHeight: 1.3 }}>
-              <span style={{ fontSize: 22 }}>{saud.emoji}</span> {saud.titulo}
-              <br />{saud.sub}
-            </h3>
+        <div style={{ padding: "20px 20px 4px" }}>
+          <div style={{ background: "#fff", borderRadius: 18, padding: "18px 22px", textAlign: "center", boxShadow: "0 4px 16px rgba(0,59,160,0.07)" }}>
+            <div style={{ color: "#16323F", fontSize: 18, fontWeight: 900, lineHeight: 1.35 }}>
+              <span style={{ fontSize: 20 }}>{saud.emoji}</span> {saud.titulo}
+            </div>
+            <div style={{ color: "#16323F", fontSize: 14, fontWeight: 700, marginTop: 4 }}>{saud.sub}</div>
           </div>
         </div>
 
         {prem && <div style={{ padding: "0 20px" }}><QuotaBar profile={profile} /></div>}
 
-        {/* 4. OS 3 BOTÕES DE CRIAR POST */}
-        <div style={{ background: "#EEF1FA", padding: "14px 20px 8px" }}>
+        {/* 4. OS 3 BOTÕES DE CRIAR POST (texto de apoio ABAIXO de cada botão) */}
+        <div style={{ padding: "18px 20px 26px" }}>
           {BOTOES_POST.map((b) => (
-            <button key={b.tipo} onClick={() => tentarGerarPost(b.tipo)} style={{ width: "100%", background: "#003BA0", color: "#fff", border: "none", borderRadius: 18, padding: "20px 18px", marginBottom: 16, cursor: "pointer", display: "flex", alignItems: "center", gap: 14, boxShadow: "0 6px 18px rgba(0,59,160,.22)", textAlign: "left", fontFamily: "Nunito,sans-serif" }}>
-              <span style={{ fontSize: 30, flexShrink: 0 }}>{b.ic}</span>
-              <span style={{ flex: 1 }}>
-                <span style={{ display: "block", fontWeight: 900, fontSize: 16, lineHeight: 1.15 }}>{b.tt}</span>
-                <span style={{ display: "block", fontSize: 12, opacity: 0.9, fontWeight: 600, marginTop: 3, lineHeight: 1.3 }}>{b.ds}</span>
-              </span>
-            </button>
+            <div key={b.tipo} style={{ marginBottom: 30 }}>
+              <button onClick={() => tentarGerarPost(b.tipo)} style={{ width: "100%", background: "#003BA0", color: "#fff", border: "none", borderRadius: 18, padding: "20px 22px", cursor: "pointer", display: "flex", alignItems: "center", gap: 16, boxShadow: "0 8px 20px rgba(0,59,160,.22)", textAlign: "left", fontFamily: "Nunito,sans-serif" }}>
+                <span style={{ fontSize: 32, flexShrink: 0 }}>{b.ic}</span>
+                <span style={{ flex: 1, fontWeight: 900, fontSize: 17, lineHeight: 1.2 }}>{b.tt}</span>
+              </button>
+              <div style={{ textAlign: "center", color: "#16323F", fontWeight: 700, fontSize: 13, lineHeight: 1.45, marginTop: 12, padding: "0 8px" }}>{b.ds}</div>
+            </div>
           ))}
         </div>
 
@@ -253,29 +256,19 @@ function Dashboard({ profile, onEdit, onLogoAtualizado }) {
           Recursos extras para o seu negócio:
         </div>
 
-        {/* 6 e 7. BANNERS (Catálogo e Logo) — clicáveis */}
-        <div style={{ padding: "16px 20px 8px" }}>
-          <div onClick={() => showToast("🛍️ Catálogo Prático chega em breve!")} style={{ borderRadius: 18, padding: 18, marginBottom: 14, cursor: "pointer", display: "flex", alignItems: "center", gap: 14, color: "#fff", background: "linear-gradient(135deg,#25A244,#1a7a3f)", boxShadow: "0 6px 18px rgba(37,162,68,.25)" }}>
-            <span style={{ fontSize: 30, flexShrink: 0 }}>🛍️</span>
-            <span style={{ flex: 1 }}>
-              <span style={{ display: "block", fontWeight: 900, fontSize: 16, lineHeight: 1.15 }}>Catálogo Prático</span>
-              <span style={{ display: "block", fontSize: 12, opacity: 0.95, fontWeight: 600, marginTop: 3, lineHeight: 1.3 }}>Crie sua vitrine online e mostre seus produtos</span>
-            </span>
-          </div>
-          <div onClick={() => showToast("🎨 Criar Logo chega em breve!")} style={{ borderRadius: 18, padding: 18, marginBottom: 14, cursor: "pointer", display: "flex", alignItems: "center", gap: 14, color: "#fff", background: "linear-gradient(135deg,#8FD420,#5A9E1B)", boxShadow: "0 6px 18px rgba(143,212,32,.28)" }}>
-            <span style={{ fontSize: 30, flexShrink: 0 }}>🎨</span>
-            <span style={{ flex: 1 }}>
-              <span style={{ display: "block", fontWeight: 900, fontSize: 16, lineHeight: 1.15 }}>Criar Logo</span>
-              <span style={{ display: "block", fontSize: 12, opacity: 0.95, fontWeight: 600, marginTop: 3, lineHeight: 1.3 }}>Design profissional e exclusivo pra sua marca</span>
-            </span>
-          </div>
+        {/* 6 e 7. BANNERS (Catálogo e Logo) — a imagem inteira é o botão */}
+        <div style={{ padding: "22px 20px 8px" }}>
+          <img src={bannerCatalogo} onClick={() => showToast("🛍️ Catálogo Prático chega em breve!")} alt="Catálogo Prático" style={{ width: "100%", display: "block", borderRadius: 18, cursor: "pointer", marginBottom: 24, boxShadow: "0 6px 20px rgba(0,59,160,.10)" }} />
+          <img src={bannerLogo} onClick={() => showToast("🎨 Criar Logo chega em breve!")} alt="Criar Logo para o meu negócio" style={{ width: "100%", display: "block", borderRadius: 18, cursor: "pointer", boxShadow: "0 6px 20px rgba(0,59,160,.10)" }} />
         </div>
 
         {/* 8. RODAPÉ */}
-        <div style={{ textAlign: "center", padding: "24px 24px 16px" }}>
-          <div style={{ color: "#16323F", fontSize: 15, fontWeight: 800, lineHeight: 1.4 }}>Seu próximo cliente pode estar<br />esperando seu próximo post.</div>
-          <div style={{ display: "flex", justifyContent: "center", margin: "16px 0 8px" }}><PostFacilLogo size={56} /></div>
-          <div style={{ color: "#003BA0", fontSize: 13, fontWeight: 800 }}>Postar nunca foi tão fácil!</div>
+        <div style={{ textAlign: "center", padding: "30px 24px 18px" }}>
+          <div style={{ color: "#16323F", fontSize: 16, fontWeight: 800, lineHeight: 1.4 }}>Seu próximo cliente pode estar<br />esperando seu próximo post.</div>
+          <div style={{ display: "flex", justifyContent: "center", margin: "18px 0 10px" }}>
+            <img src={logoPostFacil} alt="Post Fácil" style={{ width: 72, height: 72, objectFit: "contain", display: "block" }} />
+          </div>
+          <div style={{ color: "#003BA0", fontSize: 14, fontWeight: 800 }}>Postar nunca foi tão fácil!</div>
         </div>
 
         {/* 9. FAIXA VERDE-LIMÃO FINAL */}
