@@ -127,9 +127,9 @@ function ModalLembreteLogo({ onContinuar, onLogoSalvo, onCriarComIA }) {
 // Ver 01_DOCUMENTOS/Direcao_Home_Posicionamento.md
 // ============================================================
 const BOTOES_POST = [
-  { ic: "✨", tipo: "negocio",  tt: "CRIAR POST DO MEU NEGÓCIO", ds: "Imagem, legenda, seu logo, suas cores... Um post pensado pra você 👋" },
-  { ic: "📷", tipo: "produto",  tt: "CRIAR POST DO MEU PRODUTO", ds: "Mande a foto ou vídeo do produto e deixa o resto com a gente 😉" },
-  { ic: "🔥", tipo: "promocao", tt: "CRIAR POST DE PROMOÇÃO",    ds: "Informe a oferta. Nós criamos o post 🎯" },
+  { ic: "✨", tipo: "negocio",  tt: "CRIAR POST DO MEU NEGÓCIO", ds: ["Imagem, legenda, seu logo, suas cores...", "Um post pensado pra você 👋"] },
+  { ic: "📷", tipo: "produto",  tt: "CRIAR POST DO MEU PRODUTO", ds: ["Mande a foto ou vídeo do produto", "e deixa o resto com a gente 😉"] },
+  { ic: "🔥", tipo: "promocao", tt: "CRIAR POST DE PROMOÇÃO",    ds: ["Informe a oferta. Nós criamos o post 🎯"] },
 ];
 
 function Dashboard({ profile, onEdit, onLogoAtualizado }) {
@@ -188,7 +188,7 @@ function Dashboard({ profile, onEdit, onLogoAtualizado }) {
       {/* keyframes do logo flutuante na vitrine */}
       <style>{`
         @keyframes pfFloatLogo { 0%,100%{transform:translate(-50%,-34%);} 50%{transform:translate(-50%,-28%);} }
-        @keyframes pfFloatShadow { 0%,100%{width:120px;opacity:.5;} 50%{width:142px;opacity:.68;} }
+        @keyframes pfFloatShadow { 0%,100%{width:150px;opacity:.82;} 50%{width:168px;opacity:.95;} }
       `}</style>
 
       <div style={{ width: "100%", maxWidth: 430, background: "#F0F5FB", minHeight: "100vh" }}>
@@ -216,7 +216,7 @@ function Dashboard({ profile, onEdit, onLogoAtualizado }) {
         <div style={{ position: "relative", height: 300, background: "linear-gradient(180deg,#001a6e 0%,#002a8f 55%,#00329c 100%)", overflow: "hidden" }}>
           <div style={{ color: "#fff", padding: "10px 16px 0", fontWeight: 800, fontSize: 14, position: "relative", zIndex: 6 }}>← Voltar</div>
           {/* sombra retangular esfumaçada */}
-          <div style={{ position: "absolute", left: "50%", top: "60%", transform: "translate(-50%,-50%)", width: 135, height: 32, borderRadius: 22, background: "rgba(0,6,30,.52)", filter: "blur(15px)", zIndex: 4, animation: "pfFloatShadow 3.6s ease-in-out infinite" }} />
+          <div style={{ position: "absolute", left: "50%", top: "74%", transform: "translate(-50%,-50%)", width: 150, height: 34, borderRadius: 12, background: "rgba(0,3,16,.95)", filter: "blur(14px)", zIndex: 4, animation: "pfFloatShadow 3.6s ease-in-out infinite" }} />
           {/* logo Post Fácil flutuando */}
           <div style={{ position: "absolute", left: "50%", top: "30%", transform: "translate(-50%,-34%)", zIndex: 5, animation: "pfFloatLogo 3.6s ease-in-out infinite", filter: "drop-shadow(0 16px 20px rgba(0,8,40,.35))" }}>
             <img src={logoPostFacil} alt="Post Fácil" style={{ width: 200, height: 200, objectFit: "contain", display: "block" }} />
@@ -228,7 +228,7 @@ function Dashboard({ profile, onEdit, onLogoAtualizado }) {
 
         {/* 3. SAUDAÇÃO MOTIVACIONAL (card branco) */}
         <div style={{ padding: "20px 20px 4px" }}>
-          <div style={{ background: "#fff", borderRadius: 18, padding: "18px 22px", textAlign: "center", boxShadow: "0 4px 16px rgba(0,59,160,0.07)" }}>
+          <div style={{ width: "80%", margin: "0 auto", boxSizing: "border-box", background: "#fff", borderRadius: 18, padding: "18px 22px", textAlign: "center", boxShadow: "0 4px 16px rgba(0,59,160,0.07)" }}>
             <div style={{ color: "#16323F", fontSize: 18, fontWeight: 900, lineHeight: 1.35 }}>
               <span style={{ fontSize: 20 }}>{saud.emoji}</span> {saud.titulo}
             </div>
@@ -239,14 +239,16 @@ function Dashboard({ profile, onEdit, onLogoAtualizado }) {
         {prem && <div style={{ padding: "0 20px" }}><QuotaBar profile={profile} /></div>}
 
         {/* 4. OS 3 BOTÕES DE CRIAR POST (texto de apoio ABAIXO de cada botão) */}
-        <div style={{ padding: "18px 20px 26px" }}>
+        <div style={{ padding: "40px 20px 26px" }}>
           {BOTOES_POST.map((b) => (
             <div key={b.tipo} style={{ marginBottom: 30 }}>
-              <button onClick={() => tentarGerarPost(b.tipo)} style={{ width: "100%", background: "#003BA0", color: "#fff", border: "none", borderRadius: 18, padding: "20px 22px", cursor: "pointer", display: "flex", alignItems: "center", gap: 16, boxShadow: "0 8px 20px rgba(0,59,160,.22)", textAlign: "left", fontFamily: "Nunito,sans-serif" }}>
+              <button onClick={() => tentarGerarPost(b.tipo)} style={{ width: "80%", margin: "0 auto", background: "#003BA0", color: "#fff", border: "none", borderRadius: 18, padding: "20px 22px", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", gap: 12, boxShadow: "0 8px 20px rgba(0,59,160,.22)", fontFamily: "Nunito,sans-serif" }}>
                 <span style={{ fontSize: 32, flexShrink: 0 }}>{b.ic}</span>
-                <span style={{ flex: 1, fontWeight: 900, fontSize: 17, lineHeight: 1.2 }}>{b.tt}</span>
+                <span style={{ fontWeight: 900, fontSize: 17, lineHeight: 1.2, textAlign: "center" }}>{b.tt}</span>
               </button>
-              <div style={{ textAlign: "center", color: "#16323F", fontWeight: 700, fontSize: 13, lineHeight: 1.45, marginTop: 12, padding: "0 8px" }}>{b.ds}</div>
+              <div style={{ textAlign: "center", color: "#16323F", fontWeight: 700, fontSize: 13, lineHeight: 1.45, marginTop: 12, padding: "0 8px" }}>
+                {b.ds.map((l, i) => <span key={i} style={{ display: "block" }}>{l}</span>)}
+              </div>
             </div>
           ))}
         </div>
@@ -272,7 +274,7 @@ function Dashboard({ profile, onEdit, onLogoAtualizado }) {
         </div>
 
         {/* 9. FAIXA VERDE-LIMÃO FINAL */}
-        <div style={{ background: "#8FD420", height: 8 }} />
+        <div style={{ background: "#8FD420", height: 24 }} />
       </div>
 
       {showLogoModal && (
