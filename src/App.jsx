@@ -5,7 +5,7 @@ import { useState, useRef, useMemo, useEffect } from "react";
 import Onboarding from "./Onboarding.jsx";
 import { criarFicha, salvarFicha, carregarFicha } from "./ficha.js";
 import { DADOS } from "./dados.js";
-import { gerarTexto } from "./api.js";
+import { gerarTexto, gerarImagem } from "./api.js";
 import {
   PostFacilLogo, AppHeader, Toast, useToast, QuotaBar,
   ADMIN_PASS, DEFAULT_CODES, getDefaultLimits, getOverrides,
@@ -23,9 +23,15 @@ import bannerLogo from "./assets/banner-logo.jpg";
 //         zona_limpa, cta, hashtags). Ver Fluxo_Geracao_Post_REFERENCIA.md.
 // false = tudo volta ao modo demo (nenhuma chamada de API).
 // Promoção e Produto seguem SEMPRE em demo por enquanto.
-// A imagem ainda vem do placeholder demo — a IA de imagem não é chamada.
 // ============================================================
 const MODO_REAL_NEGOCIO = true;
+
+// LIGA/DESLIGA da IA de IMAGEM no post de Negócio (passo 3 da referência).
+// true  = gera a imagem LIMPA (sem texto) a partir da descricao_fundo; o
+//         texto e o logo continuam sendo aplicados por cima pelo código.
+// false = a imagem volta ao placeholder demo (gradiente).
+// Só tem efeito quando MODO_REAL_NEGOCIO também está ligado.
+const MODO_REAL_IMAGEM_NEGOCIO = true;
 
 // ============================================================
 // LANDING
@@ -531,15 +537,49 @@ async function gerarPostNegocioReal(profile) {
   const texto = await gerarTexto(system, user, 1200);
   const j = extrairJSON(texto);
 
+  // Passo 3 da referência: a IA de imagem gera a imagem LIMPA (sem texto),
+  // recebendo só a descricao_fundo. O texto e o logo são aplicados por cima
+  // pelo código (o overlay da TelaResultado). Falha aqui NÃO derruba o post:
+  // sem imagem, cai no placeholder demo (gradiente).
+  const imagem = await gerarImagemLimpaNegocio(j);
+
   // Mapeia o JSON real para o formato que a TelaResultado já sabe exibir.
-  // A imagem segue como placeholder demo; descricao_fundo NÃO é exibida.
+  // descricao_fundo NÃO é exibida ao cliente (regra de negócio).
   return {
     legenda: (j.legenda || "").trim(),
     hashtags: normalizarHashtags(j.hashtags),
     destaque: (j.texto_imagem || "").trim(),
     sub: (j.cta || "").trim(),
     canto: zonaParaCanto(j.zona_limpa),
+    imagem,
   };
+}
+
+// Gera a imagem de fundo LIMPA (sem texto) a partir da descricao_fundo.
+// Reforça explicitamente "sem texto/letras/palavras" (a IA de imagem erra ao
+// escrever) e pede a zona_limpa neutra. Retorna null se falhar ou se a IA de
+// imagem estiver desligada — nesse caso a tela usa o placeholder demo.
+async function gerarImagemLimpaNegocio(j) {
+  if (!MODO_REAL_IMAGEM_NEGOCIO) return null;
+  const fundo = (j.descricao_fundo || "").trim();
+  if (!fundo) return null;
+
+  const prompt = [
+    fundo,
+    `Mantenha a região "${j.zona_limpa || "canto inferior direito"}" limpa e neutra, com poucos detalhes, reservada para logo e texto.`,
+    "SEM TEXTO, SEM LETRAS, SEM PALAVRAS, sem números e sem logotipos na imagem.",
+    "Qualidade profissional: iluminação cuidada, composição harmoniosa, aparência premium, foco nítido.",
+  ].join(" ");
+
+  // Post é retrato tanto no feed (4:5) quanto no stories (9:16).
+  const size = "1024x1536";
+
+  try {
+    return await gerarImagem(prompt, size);
+  } catch (e) {
+    console.error("Geração de imagem falhou, usando placeholder:", e);
+    return null;
+  }
 }
 
 // ---- Recurso de mídia compartilhado (Seção 11) ----
@@ -764,10 +804,12 @@ function TelaResultado({ tipo, profile, campos, formato, resultado, onNovaVersao
         {/* card do post */}
         <div style={{ margin: "18px 20px", background: "#fff", borderRadius: 18, boxShadow: "0 6px 20px rgba(0,59,160,.12)", overflow: "hidden" }}>
           <div style={{ width: "100%", aspectRatio: aspect, background: "linear-gradient(135deg,#ffd89b,#ff6b6b 60%,#c0392b)", position: "relative", overflow: "hidden" }}>
+            {/* fundo LIMPO da nossa IA (post de Negócio); texto e logo entram por cima */}
+            {r.imagem && <img src={r.imagem} alt="" style={{ position: "absolute", inset: 0, width: "100%", height: "100%", objectFit: "cover" }} />}
             {midia && (midia.isVideo
               ? <video src={midia.url} style={{ position: "absolute", inset: 0, width: "100%", height: "100%", objectFit: "cover" }} muted playsInline />
               : <img src={midia.url} alt="" style={{ position: "absolute", inset: 0, width: "100%", height: "100%", objectFit: "cover" }} />)}
-            <div style={{ position: "absolute", inset: 0, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", color: "#fff", textAlign: "center", padding: 20, background: midia ? "rgba(0,0,0,.28)" : "transparent" }}>
+            <div style={{ position: "absolute", inset: 0, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", color: "#fff", textAlign: "center", padding: 20, background: (midia || r.imagem) ? "rgba(0,0,0,.28)" : "transparent" }}>
               <div style={{ fontSize: 34, fontWeight: 900, textShadow: "0 2px 8px rgba(0,0,0,.4)", lineHeight: 1.05 }}>{r.destaque}</div>
               <div style={{ fontSize: 15, fontWeight: 700, marginTop: 10, background: "rgba(0,0,0,.25)", padding: "5px 14px", borderRadius: 20 }}>{r.sub}</div>
             </div>
