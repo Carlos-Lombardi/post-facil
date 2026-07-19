@@ -1,5 +1,6 @@
-// Portinha dos fundos — Imagem (DALL-E / OpenAI)
+// Portinha dos fundos — Imagem (gpt-image-1-mini / OpenAI)
 // Roda no servidor do Vercel. Esconde a chave e evita CORS.
+// Os modelos GPT Image devolvem a imagem em base64 (b64_json), não URL.
 
 export default async function handler(req, res) {
   if (req.method !== "POST") {
@@ -24,11 +25,11 @@ export default async function handler(req, res) {
         Authorization: "Bearer " + apiKey,
       },
       body: JSON.stringify({
-        model: "dall-e-3",
+        model: "gpt-image-1-mini",
         prompt,
         n: 1,
         size: size || "1024x1024",
-        quality: "standard",
+        quality: "medium",
       }),
     });
 
@@ -38,7 +39,9 @@ export default async function handler(req, res) {
       return res.status(500).json({ error: dados.error.message || "Erro ao gerar imagem." });
     }
 
-    return res.status(200).json({ url: dados.data[0].url });
+    // GPT Image devolve a imagem em base64 (não URL). Devolvemos o b64 cru;
+    // o app monta o data URL para usar direto no <img src>.
+    return res.status(200).json({ b64: dados.data[0].b64_json });
   } catch (e) {
     return res.status(500).json({ error: "Falha ao gerar imagem: " + (e.message || "desconhecido") });
   }

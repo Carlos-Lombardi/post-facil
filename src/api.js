@@ -32,6 +32,7 @@ export async function gerarTexto(system, user, maxTokens = 1000) {
 
 // Gera imagem (via portinha)
 export async function gerarImagem(prompt, size = "1024x1024") {
-  const dados = await postJSON("/api/imagem", { prompt, size });
-  return dados.url;
+  const dados = await postJSON("/api/imagens", { prompt, size });
+  // A portinha devolve a imagem em base64; montamos o data URL para o <img src>.
+  return "data:image/png;base64," + dados.b64;
 }
