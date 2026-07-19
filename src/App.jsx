@@ -5,6 +5,7 @@ import { useState, useRef, useMemo, useEffect } from "react";
 import Onboarding from "./Onboarding.jsx";
 import { criarFicha, salvarFicha, carregarFicha } from "./ficha.js";
 import { DADOS } from "./dados.js";
+import { gerarTexto } from "./api.js";
 import {
   PostFacilLogo, AppHeader, Toast, useToast, QuotaBar,
   ADMIN_PASS, DEFAULT_CODES, getDefaultLimits, getOverrides,
@@ -14,6 +15,17 @@ import {
 import logoPostFacil from "./assets/logo-postfacil.png";
 import bannerCatalogo from "./assets/banner-catalogo.jpg";
 import bannerLogo from "./assets/banner-logo.jpg";
+
+// ============================================================
+// LIGA/DESLIGA DA GERAÇÃO REAL DE TEXTO — POST DE NEGÓCIO
+// true  = o post de Negócio chama a nossa IA de verdade (api/claude.js)
+//         e recebe o JSON (legenda, texto_imagem, descricao_fundo,
+//         zona_limpa, cta, hashtags). Ver Fluxo_Geracao_Post_REFERENCIA.md.
+// false = tudo volta ao modo demo (nenhuma chamada de API).
+// Promoção e Produto seguem SEMPRE em demo por enquanto.
+// A imagem ainda vem do placeholder demo — a IA de imagem não é chamada.
+// ============================================================
+const MODO_REAL_NEGOCIO = true;
 
 // ============================================================
 // LANDING
@@ -330,7 +342,25 @@ function FluxoGeracao({ tipo, profile, onSair }) {
     const usar = fmt || formato;
     setFormato(usar);
     setEtapa("loading");
-    // Fase 2: chamar o backend (arquitetura de Fluxo_Geracao_Post_REFERENCIA.md).
+
+    // Geração REAL de texto — só no post de Negócio e só quando ligada.
+    // A imagem continua vindo do placeholder demo (não chamamos a IA de imagem).
+    if (MODO_REAL_NEGOCIO && tipo === "negocio") {
+      gerarPostNegocioReal(profile)
+        .then((real) => setResultado(real))
+        .catch((e) => {
+          // Se a nossa IA falhar, cai no demo pra não travar a tela.
+          console.error("Geração real falhou, usando demo:", e);
+          setResultado(montarResultadoDemo({ tipo, profile, campos }));
+        })
+        .finally(() => {
+          incPostCreditos(profile);
+          setEtapa("resultado");
+        });
+      return;
+    }
+
+    // Modo demo (Promoção, Produto e Negócio com a geração real desligada).
     setTimeout(() => {
       setResultado(montarResultadoDemo({ tipo, profile, campos }));
       incPostCreditos(profile);
@@ -389,6 +419,127 @@ function montarResultadoDemo({ tipo, profile, campos }) {
   const cantos = ["tl", "tr", "bl", "br"];
   const canto = cantos[Math.floor(Math.random() * cantos.length)];
   return { legenda, hashtags, destaque, sub, canto };
+}
+
+// ============================================================
+// GERAÇÃO REAL DE TEXTO — POST DE NEGÓCIO
+// Segue Fluxo_Geracao_Post_REFERENCIA.md: a nossa IA "pensa em tudo
+// primeiro" e devolve UM JSON com as 6 partes. Aqui só a parte de TEXTO
+// é usada; a imagem continua sendo o placeholder demo (a IA de imagem
+// ainda não é chamada). A descricao_fundo NUNCA é mostrada ao cliente.
+// ============================================================
+
+// Localiza o segmento (com suas perguntas) pelo id salvo na ficha.
+function acharSegmento(segmentoId) {
+  for (const grupo of Object.values(DADOS)) {
+    if (grupo.direto && grupo.direto.id === segmentoId) return grupo.direto;
+    for (const cat of grupo.categorias || [])
+      for (const seg of cat.segmentos || [])
+        if (seg.id === segmentoId) return seg;
+  }
+  return null;
+}
+
+// Monta o bloco "Pergunta → Resposta" do onboarding (respostas são 1-based).
+function montarPerguntasRespostas(profile) {
+  const seg = acharSegmento(profile.segmentoId);
+  const perguntas = seg?.perguntas || [];
+  const respostas = profile.respostas || {};
+  return perguntas
+    .map((p, i) => {
+      const r = (respostas[i + 1] || "").trim();
+      return r ? `- ${p.q}\n  Resposta: ${r}` : null;
+    })
+    .filter(Boolean)
+    .join("\n");
+}
+
+// Traduz a "zona limpa" escolhida pela IA para o canto do logo na tela.
+function zonaParaCanto(zona) {
+  const z = (zona || "").toLowerCase();
+  if (z.includes("superior") && z.includes("esquerd")) return "tl";
+  if (z.includes("superior")) return "tr";
+  if (z.includes("inferior") && z.includes("esquerd")) return "bl";
+  if (z.includes("inferior")) return "br";
+  return "br"; // "centro" e demais → canto padrão para o selo do logo
+}
+
+// Normaliza hashtags (aceita array ou string) numa linha "#a #b #c".
+function normalizarHashtags(hashtags) {
+  const arr = Array.isArray(hashtags) ? hashtags : String(hashtags || "").split(/\s+/);
+  return arr
+    .map((h) => String(h).trim())
+    .filter(Boolean)
+    .map((h) => (h.startsWith("#") ? h : "#" + h.replace(/^#+/, "")))
+    .join(" ");
+}
+
+// Extrai o objeto JSON da resposta da IA, mesmo se vier com texto/cercas ```.
+function extrairJSON(texto) {
+  const t = String(texto || "");
+  const ini = t.indexOf("{");
+  const fim = t.lastIndexOf("}");
+  if (ini === -1 || fim === -1 || fim < ini) throw new Error("Resposta sem JSON.");
+  return JSON.parse(t.slice(ini, fim + 1));
+}
+
+async function gerarPostNegocioReal(profile) {
+  const nomeNeg = profile.nome || "o negócio";
+  const seg = acharSegmento(profile.segmentoId);
+  const segNome = profile.segmentoNome || seg?.nome || "";
+  const tons = (profile.tons || []).join(", ") || "não informado";
+  const qa = montarPerguntasRespostas(profile);
+  const cores = (profile.analiseLogo?.coresPrincipais || []).join(", ");
+  const estiloLogo = profile.analiseLogo?.estilo || "";
+
+  const system = [
+    "Você é o diretor de arte do Post Fácil, um app que cria posts profissionais de Instagram para pequenos negócios brasileiros.",
+    "Você PENSA A PEÇA INTEIRA DE UMA VEZ (imagem, texto da imagem e legenda nascem do mesmo raciocínio, coerentes entre si).",
+    "",
+    "Responda SEMPRE em português do Brasil e APENAS com um JSON válido, sem texto antes ou depois, sem cercas de código. O JSON tem exatamente estas chaves:",
+    '- "legenda": legenda do post para o Instagram, calorosa e profissional, coerente com o texto_imagem.',
+    '- "texto_imagem": texto CURTO (poucas palavras) que será carimbado por cima da imagem.',
+    '- "descricao_fundo": descrição do cenário para a IA de imagem, SEM texto/letras/palavras na cena. Uso interno.',
+    '- "zona_limpa": onde deixar espaço neutro para o logo/texto. Um de: "canto inferior direito", "canto inferior esquerdo", "canto superior", "centro". VARIE a cada post.',
+    '- "cta": chamada para ação curta.',
+    '- "hashtags": array de 4 a 6 hashtags do segmento (sem espaços dentro de cada uma).',
+    "",
+    "DIRETRIZES OBRIGATÓRIAS:",
+    "A. Reserve a zona_limpa (região neutra, com poucos detalhes) para o logo e o texto serem aplicados depois; a descricao_fundo deve pedir explicitamente que essa região fique limpa/neutra.",
+    "B. Tom profissional que impressione: use na descricao_fundo termos como iluminação profissional, composição cuidada, aparência premium, foco nítido, cores harmoniosas.",
+    "",
+    "REGRAS: NUNCA invente produtos/serviços que o cliente não informou. A descricao_fundo é interna e nunca é mostrada ao cliente. Ao se referir à IA nos textos ao cliente, diga \"nossa IA\".",
+  ].join("\n");
+
+  const user = [
+    "Gere UM post de Instagram para este negócio.",
+    "",
+    `Negócio: ${nomeNeg}`,
+    `Segmento: ${segNome}`,
+    `Tom de comunicação (até 2): ${tons}`,
+    cores ? `Cores da marca: ${cores}` : "",
+    estiloLogo ? `Estilo do logo: ${estiloLogo}` : "",
+    "",
+    "Respostas do onboarding do cliente:",
+    qa || "(sem respostas registradas)",
+    "",
+    "Lembre-se: varie a zona_limpa em relação a posts anteriores e responda só com o JSON.",
+  ]
+    .filter(Boolean)
+    .join("\n");
+
+  const texto = await gerarTexto(system, user, 1200);
+  const j = extrairJSON(texto);
+
+  // Mapeia o JSON real para o formato que a TelaResultado já sabe exibir.
+  // A imagem segue como placeholder demo; descricao_fundo NÃO é exibida.
+  return {
+    legenda: (j.legenda || "").trim(),
+    hashtags: normalizarHashtags(j.hashtags),
+    destaque: (j.texto_imagem || "").trim(),
+    sub: (j.cta || "").trim(),
+    canto: zonaParaCanto(j.zona_limpa),
+  };
 }
 
 // ---- Recurso de mídia compartilhado (Seção 11) ----
