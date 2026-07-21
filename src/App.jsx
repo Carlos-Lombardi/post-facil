@@ -470,6 +470,38 @@ function zonaParaCanto(zona) {
   return "br"; // "centro" e demais → canto padrão para o selo do logo
 }
 
+// Sorteia um item de uma lista (usado para variar a cena da imagem).
+const escolherAleatorio = (arr) => arr[Math.floor(Math.random() * arr.length)];
+
+// Normaliza a "zona_texto" da IA (a faixa onde o texto é carimbado).
+// Aceita objeto {posicao, altura_pct} ou texto ("faixa inferior 30%").
+// Sempre devolve { posicao: "superior"|"inferior", alturaPct: 22..45 }.
+function parseZonaTexto(z) {
+  let posicao = "inferior";
+  let alturaPct = 30;
+  const ehCima = (s) => /superior|cima|topo|alto/.test(s);
+  if (z && typeof z === "object") {
+    if (ehCima(String(z.posicao || z.posição || "").toLowerCase())) posicao = "superior";
+    const n = parseInt(z.altura_pct ?? z.alturaPct, 10);
+    if (!isNaN(n)) alturaPct = n;
+  } else if (typeof z === "string") {
+    const s = z.toLowerCase();
+    if (ehCima(s)) posicao = "superior";
+    const m = s.match(/(\d{1,3})\s*%/);
+    if (m) alturaPct = parseInt(m[1], 10);
+  }
+  alturaPct = Math.min(45, Math.max(22, alturaPct)); // limites sãos
+  return { posicao, alturaPct };
+}
+
+// Força o canto do logo para a faixa OPOSTA à do texto, para que nunca se
+// sobreponham. Mantém o lado horizontal (esquerda/direita) escolhido pela IA.
+function cantoOpostoAoTexto(canto, posicaoTexto) {
+  const horiz = canto.includes("l") ? "l" : "r";
+  const vert = posicaoTexto === "inferior" ? "t" : "b"; // texto embaixo → logo em cima
+  return vert + horiz;
+}
+
 // Normaliza hashtags (aceita array ou string) numa linha "#a #b #c".
 function normalizarHashtags(hashtags) {
   const arr = Array.isArray(hashtags) ? hashtags : String(hashtags || "").split(/\s+/);
@@ -506,13 +538,15 @@ async function gerarPostNegocioReal(profile) {
     '- "legenda": legenda do post para o Instagram, calorosa e profissional, coerente com o texto_imagem.',
     '- "texto_imagem": texto CURTO (poucas palavras) que será carimbado por cima da imagem.',
     '- "descricao_fundo": descrição do cenário para a IA de imagem, SEM texto/letras/palavras na cena. Uso interno.',
-    '- "zona_limpa": onde deixar espaço neutro para o logo/texto. Um de: "canto inferior direito", "canto inferior esquerdo", "canto superior", "centro". VARIE a cada post.',
+    '- "zona_texto": faixa (em proporção da altura) onde o texto será carimbado. Objeto com {"posicao": "superior" OU "inferior", "altura_pct": número de 25 a 40}. VARIE a posicao e a altura_pct a cada post.',
+    '- "zona_limpa": canto onde ficará o logo. Um de: "canto inferior direito", "canto inferior esquerdo", "canto superior direito", "canto superior esquerdo". VARIE a cada post. O logo fica sempre na faixa OPOSTA à do texto.',
     '- "cta": chamada para ação curta.',
     '- "hashtags": array de 4 a 6 hashtags do segmento (sem espaços dentro de cada uma).',
     "",
     "DIRETRIZES OBRIGATÓRIAS:",
-    "A. Reserve a zona_limpa (região neutra, com poucos detalhes) para o logo e o texto serem aplicados depois; a descricao_fundo deve pedir explicitamente que essa região fique limpa/neutra.",
+    "A. Reserve a faixa do texto (zona_texto) e o canto oposto do logo como regiões neutras, com poucos detalhes; a descricao_fundo deve pedir explicitamente que essas regiões fiquem limpas/neutras.",
     "B. Tom profissional que impressione: use na descricao_fundo termos como iluminação profissional, composição cuidada, aparência premium, foco nítido, cores harmoniosas.",
+    "C. VARIE A CENA a cada post: mude cenário, ângulo, enquadramento e composição na descricao_fundo. Evite repetir o mesmo clichê (ex.: não caia sempre em \"xícara sobre balcão de madeira\"). Mantenha sempre a fidelidade ao segmento e à identidade do negócio.",
     "",
     "REGRAS: NUNCA invente produtos/serviços que o cliente não informou. A descricao_fundo é interna e nunca é mostrada ao cliente. Ao se referir à IA nos textos ao cliente, diga \"nossa IA\".",
   ].join("\n");
@@ -529,7 +563,7 @@ async function gerarPostNegocioReal(profile) {
     "Respostas do onboarding do cliente:",
     qa || "(sem respostas registradas)",
     "",
-    "Lembre-se: varie a zona_limpa em relação a posts anteriores e responda só com o JSON.",
+    "Lembre-se: varie a zona_texto (posicao e altura) e a cena da imagem em relação a posts anteriores, e responda só com o JSON.",
   ]
     .filter(Boolean)
     .join("\n");
@@ -537,11 +571,16 @@ async function gerarPostNegocioReal(profile) {
   const texto = await gerarTexto(system, user, 1200);
   const j = extrairJSON(texto);
 
+  // Faixa (em proporção) onde o texto será carimbado, indicada pela IA.
+  const zonaTexto = parseZonaTexto(j.zona_texto);
+  // O logo vai para a faixa OPOSTA à do texto, para não se sobreporem.
+  const canto = cantoOpostoAoTexto(zonaParaCanto(j.zona_limpa), zonaTexto.posicao);
+
   // Passo 3 da referência: a IA de imagem gera a imagem LIMPA (sem texto),
   // recebendo só a descricao_fundo. O texto e o logo são aplicados por cima
   // pelo código (o overlay da TelaResultado). Falha aqui NÃO derruba o post:
   // sem imagem, cai no placeholder demo (gradiente).
-  const imagem = await gerarImagemLimpaNegocio(j);
+  const imagem = await gerarImagemLimpaNegocio(j, zonaTexto);
 
   // Mapeia o JSON real para o formato que a TelaResultado já sabe exibir.
   // descricao_fundo NÃO é exibida ao cliente (regra de negócio).
@@ -550,7 +589,8 @@ async function gerarPostNegocioReal(profile) {
     hashtags: normalizarHashtags(j.hashtags),
     destaque: (j.texto_imagem || "").trim(),
     sub: (j.cta || "").trim(),
-    canto: zonaParaCanto(j.zona_limpa),
+    canto,
+    zonaTexto,
     imagem,
   };
 }
@@ -559,14 +599,40 @@ async function gerarPostNegocioReal(profile) {
 // Reforça explicitamente "sem texto/letras/palavras" (a IA de imagem erra ao
 // escrever) e pede a zona_limpa neutra. Retorna null se falhar ou se a IA de
 // imagem estiver desligada — nesse caso a tela usa o placeholder demo.
-async function gerarImagemLimpaNegocio(j) {
+async function gerarImagemLimpaNegocio(j, zonaTexto) {
   if (!MODO_REAL_IMAGEM_NEGOCIO) return null;
   const fundo = (j.descricao_fundo || "").trim();
   if (!fundo) return null;
 
+  const faixaTexto = zonaTexto?.posicao === "superior" ? "superior" : "inferior";
+  const alturaTexto = zonaTexto?.alturaPct || 30;
+  const cantoLogo = faixaTexto === "superior" ? "inferior" : "superior";
+
+  // A IA de imagem é "sem memória" e converge para a mesma cena a cada chamada.
+  // Sorteamos ângulo, enquadramento, composição e luz para forçar variação
+  // real entre gerações, mantendo o segmento e a identidade do negócio.
+  const angulo = escolherAleatorio([
+    "ângulo baixo (contra-plongée)", "vista de cima (flat lay)", "à altura dos olhos",
+    "vista em três quartos", "close-up de detalhe", "plano aberto do ambiente",
+  ]);
+  const enquadramento = escolherAleatorio([
+    "enquadramento fechado no detalhe", "plano médio", "plano aberto mostrando o entorno",
+    "composição com bastante espaço negativo",
+  ]);
+  const composicao = escolherAleatorio([
+    "regra dos terços", "composição centralizada e simétrica",
+    "linhas diagonais dinâmicas", "sujeito em foco com fundo desfocado (bokeh)",
+  ]);
+  const luz = escolherAleatorio([
+    "luz natural de janela", "luz quente de fim de tarde",
+    "iluminação de estúdio suave", "manhã clara e arejada",
+  ]);
+
   const prompt = [
     fundo,
-    `Mantenha a região "${j.zona_limpa || "canto inferior direito"}" limpa e neutra, com poucos detalhes, reservada para logo e texto.`,
+    `Variação obrigatória desta geração: ${angulo}; ${enquadramento}; ${composicao}; ${luz}.`,
+    "Crie uma CENA DIFERENTE das anteriores — outro cenário, ângulo, enquadramento e composição — mantendo o mesmo segmento e a identidade do negócio.",
+    `Mantenha a faixa ${faixaTexto} (cerca de ${alturaTexto}% da altura) e o canto ${cantoLogo} limpos e neutros, com poucos detalhes, reservados para texto e logo.`,
     "SEM TEXTO, SEM LETRAS, SEM PALAVRAS, sem números e sem logotipos na imagem.",
     "Qualidade profissional: iluminação cuidada, composição harmoniosa, aparência premium, foco nítido.",
   ].join(" ");
@@ -781,6 +847,28 @@ function TelaResultado({ tipo, profile, campos, formato, resultado, onNovaVersao
     bl: { bottom: 12, left: 12 }, br: { bottom: 12, right: 12 },
   }[r.canto || "br"];
 
+  // Posiciona o texto DENTRO da faixa reservada pela IA (zona_texto), em vez
+  // de fixá-lo no centro. Sem zona_texto (posts demo), mantém o centro antigo.
+  const zt = r.zonaTexto;
+  const temFundo = !!(midia || r.imagem);
+  const textoBox = zt
+    ? {
+        position: "absolute", left: 0, right: 0,
+        [zt.posicao === "superior" ? "top" : "bottom"]: 0,
+        height: zt.alturaPct + "%",
+        display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center",
+        color: "#fff", textAlign: "center", padding: "12px 20px",
+        background: temFundo
+          ? `linear-gradient(${zt.posicao === "superior" ? "to bottom" : "to top"}, rgba(0,0,0,.42), rgba(0,0,0,0))`
+          : "transparent",
+      }
+    : {
+        position: "absolute", inset: 0,
+        display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center",
+        color: "#fff", textAlign: "center", padding: 20,
+        background: temFundo ? "rgba(0,0,0,.28)" : "transparent",
+      };
+
   function copiar() {
     doCopy(`${r.legenda}\n\n${r.hashtags}`, () => showToast("📋 Legenda copiada!"), () => showToast("Não consegui copiar 😕"));
   }
@@ -809,7 +897,7 @@ function TelaResultado({ tipo, profile, campos, formato, resultado, onNovaVersao
             {midia && (midia.isVideo
               ? <video src={midia.url} style={{ position: "absolute", inset: 0, width: "100%", height: "100%", objectFit: "cover" }} muted playsInline />
               : <img src={midia.url} alt="" style={{ position: "absolute", inset: 0, width: "100%", height: "100%", objectFit: "cover" }} />)}
-            <div style={{ position: "absolute", inset: 0, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", color: "#fff", textAlign: "center", padding: 20, background: (midia || r.imagem) ? "rgba(0,0,0,.28)" : "transparent" }}>
+            <div style={textoBox}>
               <div style={{ fontSize: 34, fontWeight: 900, textShadow: "0 2px 8px rgba(0,0,0,.4)", lineHeight: 1.05 }}>{r.destaque}</div>
               <div style={{ fontSize: 15, fontWeight: 700, marginTop: 10, background: "rgba(0,0,0,.25)", padding: "5px 14px", borderRadius: 20 }}>{r.sub}</div>
             </div>
