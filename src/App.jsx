@@ -494,6 +494,16 @@ function parseZonaTexto(z) {
   return { posicao, alturaPct };
 }
 
+// Lê a "metade_assunto" (metade da imagem onde fica o assunto principal).
+// Retorna "superior" | "inferior", ou null se a IA não informou.
+function parseMetade(m) {
+  if (m == null) return null;
+  const s = String(m).toLowerCase();
+  if (/superior|cima|topo|alto/.test(s)) return "superior";
+  if (/inferior|baixo|fundo|embaixo/.test(s)) return "inferior";
+  return null;
+}
+
 // Força o canto do logo para a faixa OPOSTA à do texto, para que nunca se
 // sobreponham. Mantém o lado horizontal (esquerda/direita) escolhido pela IA.
 function cantoOpostoAoTexto(canto, posicaoTexto) {
@@ -537,14 +547,15 @@ async function gerarPostNegocioReal(profile) {
     "Responda SEMPRE em português do Brasil e APENAS com um JSON válido, sem texto antes ou depois, sem cercas de código. O JSON tem exatamente estas chaves:",
     '- "legenda": legenda do post para o Instagram, calorosa e profissional, coerente com o texto_imagem.',
     '- "texto_imagem": texto CURTO (poucas palavras) que será carimbado por cima da imagem.',
-    '- "descricao_fundo": descrição do cenário para a IA de imagem, SEM texto/letras/palavras na cena. Uso interno.',
-    '- "zona_texto": faixa (em proporção da altura) onde o texto será carimbado. Objeto com {"posicao": "superior" OU "inferior", "altura_pct": número de 25 a 40}. VARIE a posicao e a altura_pct a cada post.',
+    '- "metade_assunto": em qual metade da imagem fica o ASSUNTO PRINCIPAL da cena. "superior" OU "inferior". ALTERNE entre posts.',
+    '- "descricao_fundo": descrição do cenário para a IA de imagem, SEM texto/letras/palavras na cena. Coloque o assunto principal na metade_assunto e descreva a metade OPOSTA como fundo limpo, neutro e desfocado, com espaço livre. Uso interno.',
+    '- "zona_texto": faixa onde o texto será carimbado, SEMPRE na metade OPOSTA ao metade_assunto (onde a imagem fica limpa). Objeto {"posicao": "superior" OU "inferior", "altura_pct": número de 25 a 40}. A posicao é o oposto de metade_assunto; VARIE a altura_pct.',
     '- "zona_limpa": canto onde ficará o logo. Um de: "canto inferior direito", "canto inferior esquerdo", "canto superior direito", "canto superior esquerdo". VARIE a cada post. O logo fica sempre na faixa OPOSTA à do texto.',
     '- "cta": chamada para ação curta.',
     '- "hashtags": array de 4 a 6 hashtags do segmento (sem espaços dentro de cada uma).',
     "",
     "DIRETRIZES OBRIGATÓRIAS:",
-    "A. Reserve a faixa do texto (zona_texto) e o canto oposto do logo como regiões neutras, com poucos detalhes; a descricao_fundo deve pedir explicitamente que essas regiões fiquem limpas/neutras.",
+    "A. COORDENE cena e texto: decida a metade_assunto (onde fica o assunto) e ponha o texto na metade OPOSTA. A descricao_fundo DEVE deixar a metade do texto visualmente limpa — fundo neutro e desfocado, sem elementos importantes — para o texto ter onde respirar. O assunto principal NUNCA fica na faixa do texto.",
     "B. Tom profissional que impressione: use na descricao_fundo termos como iluminação profissional, composição cuidada, aparência premium, foco nítido, cores harmoniosas.",
     "C. VARIE A CENA a cada post: mude cenário, ângulo, enquadramento e composição na descricao_fundo. Evite repetir o mesmo clichê (ex.: não caia sempre em \"xícara sobre balcão de madeira\"). Mantenha sempre a fidelidade ao segmento e à identidade do negócio.",
     "",
@@ -563,7 +574,7 @@ async function gerarPostNegocioReal(profile) {
     "Respostas do onboarding do cliente:",
     qa || "(sem respostas registradas)",
     "",
-    "Lembre-se: varie a zona_texto (posicao e altura) e a cena da imagem em relação a posts anteriores, e responda só com o JSON.",
+    "Lembre-se: alterne a metade_assunto entre posts (às vezes o assunto em cima, às vezes embaixo), ponha o texto sempre na metade oposta e varie a cena. Responda só com o JSON.",
   ]
     .filter(Boolean)
     .join("\n");
@@ -573,6 +584,12 @@ async function gerarPostNegocioReal(profile) {
 
   // Faixa (em proporção) onde o texto será carimbado, indicada pela IA.
   const zonaTexto = parseZonaTexto(j.zona_texto);
+  // Coerência cena↔texto: o texto vai SEMPRE na metade oposta ao assunto
+  // principal da imagem, para nunca cair por cima dele. Quando a IA informa a
+  // metade_assunto, forçamos a posicao do texto para o lado oposto (não confiamos
+  // só no prompt — o código garante).
+  const metadeAssunto = parseMetade(j.metade_assunto);
+  if (metadeAssunto) zonaTexto.posicao = metadeAssunto === "superior" ? "inferior" : "superior";
   // O logo vai para a faixa OPOSTA à do texto, para não se sobreporem.
   const canto = cantoOpostoAoTexto(zonaParaCanto(j.zona_limpa), zonaTexto.posicao);
 
@@ -606,7 +623,10 @@ async function gerarImagemLimpaNegocio(j, zonaTexto) {
 
   const faixaTexto = zonaTexto?.posicao === "superior" ? "superior" : "inferior";
   const alturaTexto = zonaTexto?.alturaPct || 30;
-  const cantoLogo = faixaTexto === "superior" ? "inferior" : "superior";
+  // O texto já vem forçado para a metade oposta ao assunto; então o assunto
+  // (e o pequeno logo de canto) ficam na metade contrária à faixa do texto.
+  const metadeAssunto = faixaTexto === "superior" ? "inferior" : "superior";
+  const cantoLogo = metadeAssunto;
 
   // A IA de imagem é "sem memória" e converge para a mesma cena a cada chamada.
   // Sorteamos ângulo, enquadramento, composição e luz para forçar variação
@@ -632,7 +652,8 @@ async function gerarImagemLimpaNegocio(j, zonaTexto) {
     fundo,
     `Variação obrigatória desta geração: ${angulo}; ${enquadramento}; ${composicao}; ${luz}.`,
     "Crie uma CENA DIFERENTE das anteriores — outro cenário, ângulo, enquadramento e composição — mantendo o mesmo segmento e a identidade do negócio.",
-    `Mantenha a faixa ${faixaTexto} (cerca de ${alturaTexto}% da altura) e o canto ${cantoLogo} limpos e neutros, com poucos detalhes, reservados para texto e logo.`,
+    `COMPOSIÇÃO: posicione o assunto principal na metade ${metadeAssunto} da imagem. A metade ${faixaTexto} (cerca de ${alturaTexto}% da altura) deve ficar visualmente LIMPA — fundo neutro e desfocado, sem elementos importantes — como espaço livre para o texto respirar.`,
+    `Deixe também o canto da metade ${cantoLogo} discreto para um pequeno logo.`,
     "SEM TEXTO, SEM LETRAS, SEM PALAVRAS, sem números e sem logotipos na imagem.",
     "Qualidade profissional: iluminação cuidada, composição harmoniosa, aparência premium, foco nítido.",
   ].join(" ");
