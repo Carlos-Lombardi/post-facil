@@ -1,0 +1,275 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Post Fácil — Teste do overlay de Negócio (A/B)</title>
+<style>
+  :root{
+    --azul:#003BA0; --texto:#16323F; --cinza:#5C7686; --fundo:#F0F5FB;
+    --marca:#9B1129;
+  }
+  *{box-sizing:border-box}
+  body{
+    margin:0;background:var(--fundo);color:var(--texto);
+    font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;line-height:1.5;
+  }
+  header{background:var(--azul);color:#fff;padding:24px 20px 20px}
+  header h1{margin:0 0 5px;font-size:20px}
+  header p{margin:0;font-size:13.5px;opacity:.9;max-width:70ch}
+
+  .painel{
+    background:#fff;border-bottom:1px solid #dbe6f2;padding:14px 20px;
+    display:flex;flex-wrap:wrap;gap:14px 22px;align-items:center;
+    position:sticky;top:0;z-index:5;
+  }
+  .campo{display:flex;align-items:center;gap:9px;font-size:14px}
+  .campo label{font-weight:600;color:var(--cinza)}
+  input[type=color]{width:42px;height:30px;padding:0;border:1px solid #cdd9e5;border-radius:8px;background:none;cursor:pointer}
+  input[type=text]{padding:7px 10px;border:1px solid #cdd9e5;border-radius:8px;font-size:14px;min-width:220px}
+  .presets{display:flex;gap:6px}
+  .preset{width:24px;height:24px;border-radius:50%;border:2px solid #fff;box-shadow:0 0 0 1px #cdd9e5;cursor:pointer;padding:0}
+  .preset:focus-visible{outline:3px solid var(--azul);outline-offset:2px}
+  .alternar{display:flex;align-items:center;gap:7px;font-size:14px;color:var(--cinza);font-weight:600;cursor:pointer}
+
+  main{padding:24px 20px 60px;max-width:900px;margin:0 auto}
+  .grade{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:26px}
+
+  .cartao{background:#fff;border-radius:14px;overflow:hidden;box-shadow:0 2px 10px rgba(22,50,63,.09)}
+
+  /* O PALCO reproduz o container do card no app:
+     position:relative + overflow:hidden + container-type:inline-size (para o cqi). */
+  .palco{
+    position:relative;overflow:hidden;background:#fff;
+    container-type:inline-size;
+    background:linear-gradient(135deg,#ffd89b,#ff6b6b 60%,#c0392b);
+  }
+  .palco.f45{aspect-ratio:4/5}
+  .palco.f916{aspect-ratio:9/16}
+
+  /* Imagem de exemplo: assunto no MIOLO (círculo central), faixas calmas.
+     Serve para conferir a regra de composição. */
+  .foto{position:absolute;inset:0;background:linear-gradient(165deg,#6f5a48 0%,#8d7360 45%,#4a3b30 100%)}
+  .foto::after{
+    content:"";position:absolute;left:50%;top:50%;
+    width:56%;height:40%;transform:translate(-50%,-50%);
+    border-radius:46% 54% 50% 50%;
+    background:radial-gradient(circle at 40% 35%,#f3e2cd,#b8926c 70%,#8a6a4c);
+    box-shadow:0 18px 40px rgba(0,0,0,.35);
+  }
+  .semfoto .foto{background:#e9edf3}
+  .semfoto .foto::after{display:none}
+
+  .overlay-svg{position:absolute;inset:0;width:100%;height:100%;pointer-events:none;display:block}
+
+  /* Cartão claro do logo — quadrado, lado em cqi (= % da largura), posição fixa. */
+  .cardlogo{
+    position:absolute;width:20.56cqi;height:20.56cqi;border-radius:2.8cqi;
+    background:#EFE6D9;box-shadow:0 4px 14px rgba(0,0,0,.18);padding:6%;
+    display:flex;align-items:center;justify-content:center;overflow:hidden;
+  }
+  .cardlogo img{width:100%;height:100%;object-fit:contain}
+  .cardlogo span{color:#9a9086;font-weight:700;font-size:3.2cqi;letter-spacing:.15em}
+
+  /* Texto grande na faixa reservada. */
+  .txtbox{position:absolute;left:0;right:0;padding:0 6%;text-align:center;pointer-events:none;
+    display:flex;flex-direction:column;align-items:center}
+  .txtbox .linha{
+    color:#fff;font-weight:900;font-size:8.1cqi;line-height:1.05;letter-spacing:-.02em;
+    text-shadow:0 .5cqi 1.2cqi rgba(0,0,0,.62), 0 .2cqi .5cqi rgba(0,0,0,.5);
+    font-family:'Arial Black','Helvetica Neue',system-ui,sans-serif;
+  }
+
+  /* guias das faixas 20% (opcional) */
+  .guias{position:absolute;inset:0;display:none;pointer-events:none}
+  .mostrarguias .guias{display:block}
+  .guias span{
+    position:absolute;left:0;right:0;height:20%;background:rgba(0,59,160,.16);
+    border-top:1px dashed rgba(255,255,255,.85);border-bottom:1px dashed rgba(255,255,255,.85);
+    font:600 10px/1 system-ui,sans-serif;color:#fff;display:flex;align-items:center;justify-content:center;
+    letter-spacing:.06em;text-transform:uppercase;
+  }
+  .guias .cima{top:0}
+  .guias .baixo{bottom:0}
+
+  .legenda{padding:12px 15px 15px}
+  .legenda h2{margin:0 0 3px;font-size:15px}
+  .legenda p{margin:0;font-size:13px;color:var(--cinza)}
+
+  .nota{margin-top:30px;background:#fff;border-left:4px solid #25A244;border-radius:10px;padding:16px 18px;font-size:13.5px}
+  .nota h2{margin:0 0 8px;font-size:15px}
+  .nota ul{margin:0;padding-left:20px}
+  .nota li{margin-bottom:6px}
+  .nota code{background:var(--fundo);padding:1px 5px;border-radius:4px;font-size:12.5px}
+</style>
+</head>
+<body>
+
+<header>
+  <h1>Teste do overlay de Negócio — variantes A e B</h1>
+  <p>Reproduz fielmente o componente <code>OverlayNegocio</code> do app (mesmas medidas em cqi, cor única
+     que recolore onda e degradê, cartão do logo, texto em até 2 linhas com sombra difusa). Sobre uma
+     imagem de exemplo, sem chamar a API. O app alterna A/B a cada post.</p>
+</header>
+
+<div class="painel">
+  <div class="campo">
+    <label for="cor">Cor da marca</label>
+    <input type="color" id="cor" value="#9B1129">
+  </div>
+  <div class="presets" role="group" aria-label="Cores de exemplo">
+    <button class="preset" style="background:#9B1129" data-cor="#9B1129" aria-label="Vinho"></button>
+    <button class="preset" style="background:#003BA0" data-cor="#003BA0" aria-label="Azul"></button>
+    <button class="preset" style="background:#25A244" data-cor="#25A244" aria-label="Verde"></button>
+    <button class="preset" style="background:#E08A00" data-cor="#E08A00" aria-label="Âmbar"></button>
+    <button class="preset" style="background:#5B2E8C" data-cor="#5B2E8C" aria-label="Roxo"></button>
+    <button class="preset" style="background:#0F7C86" data-cor="#0F7C86" aria-label="Petróleo"></button>
+  </div>
+  <div class="campo">
+    <label for="texto">Texto</label>
+    <input type="text" id="texto" value="Seu amor merece esse carinho">
+  </div>
+  <label class="alternar"><input type="checkbox" id="formato"> Stories (9:16)</label>
+  <label class="alternar"><input type="checkbox" id="guias"> Mostrar as faixas</label>
+  <label class="alternar"><input type="checkbox" id="foto" checked> Imagem de exemplo</label>
+  <label class="alternar"><input type="checkbox" id="logo"> Logo de exemplo</label>
+</div>
+
+<main>
+  <div class="grade" id="grade"></div>
+
+  <div class="nota">
+    <h2>O que conferir</h2>
+    <ul>
+      <li><b>Variante A</b>: onda no topo, cartão do logo em cima à esquerda, texto embaixo.</li>
+      <li><b>Variante B</b>: onda na base, texto em cima, cartão do logo embaixo à direita.</li>
+      <li>Troque a <b>cor da marca</b> — a onda e o degradê recolorem juntos (uma variável única). No app é fixa por enquanto: <code>#9B1129</code>.</li>
+      <li>Ligue <b>Mostrar as faixas</b>: nada importante deve ficar nos 20% de cima/baixo — é o que a regra do prompt de imagem garante.</li>
+      <li>Ligue <b>Stories (9:16)</b>: cartão e texto seguem sem distorção; só a onda decorativa estica um pouco na borda.</li>
+    </ul>
+  </div>
+</main>
+
+<script>
+// ---- Espelho do LAYOUTS_NEGOCIO do app ----
+const LAYOUTS = {
+  A: {
+    onda: "M0,0 H1080 V14 C700,44 300,62 0,222 Z",
+    grad: { y:985, h:365, stops:[[0,0],[0.55,0.38],[1,0.82]] },
+    logo: { top:33/1350, left:50/1080 },
+    texto:{ pos:"baixo" },
+    nome:"Variante A — onda no topo", desc:"Logo em cima à esquerda, texto embaixo."
+  },
+  B: {
+    onda: "M0,1350 L0,1336 C380,1306 780,1288 1080,1128 L1080,1350 Z",
+    grad: { y:0, h:365, stops:[[0,0.82],[0.45,0.38],[1,0]] },
+    logo: { bottom:33/1350, right:50/1080 },
+    texto:{ pos:"cima" },
+    nome:"Variante B — onda na base", desc:"Texto em cima, logo embaixo à direita."
+  },
+};
+
+// ---- Espelho de quebrarEmLinhas do app (até 2 linhas equilibradas) ----
+function quebrarEmLinhas(txt){
+  const palavras = String(txt||"").trim().split(/\s+/).filter(Boolean);
+  if (palavras.length <= 1) return palavras;
+  let melhor=[palavras.join(" ")], menorDif=Infinity;
+  for(let i=1;i<palavras.length;i++){
+    const a=palavras.slice(0,i).join(" "), b=palavras.slice(i).join(" ");
+    const dif=Math.abs(a.length-b.length);
+    if(dif<menorDif){menorDif=dif;melhor=[a,b];}
+  }
+  return melhor;
+}
+
+// Logo de exemplo (SVG simples) para simular o logo do cliente no cartão.
+const LOGO_EXEMPLO =
+  "data:image/svg+xml;utf8," + encodeURIComponent(
+  `<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'>
+     <circle cx='50' cy='38' r='24' fill='#003BA0'/>
+     <rect x='20' y='66' width='60' height='12' rx='6' fill='#16323F'/>
+   </svg>`);
+
+function overlayHTML(key){
+  const L = LAYOUTS[key];
+  const gid = "pfgrad-" + key;
+  const stops = L.grad.stops.map(([o,op]) =>
+    `<stop offset="${o}" stop-color="var(--marca)" stop-opacity="${op}"/>`).join("");
+
+  const posLogo = [
+    L.logo.top!=null    ? `top:${L.logo.top*100}%`       : "",
+    L.logo.bottom!=null ? `bottom:${L.logo.bottom*100}%` : "",
+    L.logo.left!=null   ? `left:${L.logo.left*100}%`     : "",
+    L.logo.right!=null  ? `right:${L.logo.right*100}%`   : "",
+  ].filter(Boolean).join(";");
+
+  const anchor = L.texto.pos==="cima"
+    ? "top:2.5%;justify-content:flex-start"
+    : "bottom:2.5%;justify-content:flex-end";
+
+  return `
+    <svg class="overlay-svg" viewBox="0 0 1080 1350" preserveAspectRatio="none" xmlns="http://www.w3.org/2000/svg">
+      <defs><linearGradient id="${gid}" x1="0" y1="0" x2="0" y2="1">${stops}</linearGradient></defs>
+      <rect x="0" y="${L.grad.y}" width="1080" height="${L.grad.h}" fill="url(#${gid})"/>
+      <path d="${L.onda}" fill="var(--marca)"/>
+    </svg>
+    <div class="cardlogo" style="${posLogo}" data-slot="logo"></div>
+    <div class="txtbox" style="${anchor}" data-slot="texto"></div>
+  `;
+}
+
+const grade = document.getElementById("grade");
+grade.innerHTML = ["A","B"].map(k => `
+  <article class="cartao">
+    <div class="palco f45" data-variante="${k}">
+      <div class="foto"></div>
+      ${overlayHTML(k)}
+      <div class="guias"><span class="cima">20% reservado</span><span class="baixo">20% reservado</span></div>
+    </div>
+    <div class="legenda"><h2>${LAYOUTS[k].nome}</h2><p>${LAYOUTS[k].desc}</p></div>
+  </article>
+`).join("");
+
+// ---- estado / render dos slots dinâmicos (texto e logo) ----
+const el = (id)=>document.getElementById(id);
+
+function pintarTexto(){
+  const linhas = quebrarEmLinhas(el("texto").value);
+  document.querySelectorAll('[data-slot="texto"]').forEach(box=>{
+    box.innerHTML = linhas.map(l=>`<div class="linha">${l.replace(/</g,"&lt;")}</div>`).join("");
+  });
+}
+function pintarLogo(){
+  const usar = el("logo").checked;
+  document.querySelectorAll('[data-slot="logo"]').forEach(box=>{
+    box.innerHTML = usar ? `<img src="${LOGO_EXEMPLO}" alt="logo">` : `<span>LOGO</span>`;
+  });
+}
+function aplicarToggles(){
+  const stories = el("formato").checked;
+  const guias   = el("guias").checked;
+  const foto    = el("foto").checked;
+  document.querySelectorAll(".palco").forEach(p=>{
+    p.classList.toggle("f45", !stories);
+    p.classList.toggle("f916", stories);
+    p.classList.toggle("mostrarguias", guias);
+    p.classList.toggle("semfoto", !foto);
+  });
+}
+
+el("cor").addEventListener("input", e=>
+  document.documentElement.style.setProperty("--marca", e.target.value));
+document.querySelectorAll(".preset").forEach(b=>
+  b.addEventListener("click", ()=>{
+    el("cor").value = b.dataset.cor;
+    document.documentElement.style.setProperty("--marca", b.dataset.cor);
+  }));
+el("texto").addEventListener("input", pintarTexto);
+el("logo").addEventListener("change", pintarLogo);
+["formato","guias","foto"].forEach(id=> el(id).addEventListener("change", aplicarToggles));
+
+pintarTexto(); pintarLogo(); aplicarToggles();
+</script>
+
+</body>
+</html>

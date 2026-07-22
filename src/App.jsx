@@ -20,7 +20,8 @@ import bannerLogo from "./assets/banner-logo.jpg";
 // LIGA/DESLIGA DA GERAÇÃO REAL DE TEXTO — POST DE NEGÓCIO
 // true  = o post de Negócio chama a nossa IA de verdade (api/claude.js)
 //         e recebe o JSON (legenda, texto_imagem, descricao_fundo,
-//         zona_limpa, cta, hashtags). Ver Fluxo_Geracao_Post_REFERENCIA.md.
+//         cta, hashtags). A posição do texto/logo é FIXA pelo layout
+//         (não vem mais da IA). Ver Fluxo_Geracao_Post_REFERENCIA.md.
 // false = tudo volta ao modo demo (nenhuma chamada de API).
 // Promoção e Produto seguem SEMPRE em demo por enquanto.
 // ============================================================
@@ -32,6 +33,60 @@ const MODO_REAL_NEGOCIO = true;
 // false = a imagem volta ao placeholder demo (gradiente).
 // Só tem efeito quando MODO_REAL_NEGOCIO também está ligado.
 const MODO_REAL_IMAGEM_NEGOCIO = true;
+
+// ============================================================
+// SEGUNDA CAMADA (OVERLAY) DO POST DE NEGÓCIO
+// Layout FIXO copiado de layouts-post-facil.html (viewBox 1080×1350, 4:5).
+// A imagem limpa da IA entra por baixo; esta camada gráfica entra por cima.
+// Duas variantes que o app ALTERNA a cada post:
+//   A → onda no topo, logo em cima à esquerda, texto embaixo.
+//   B → onda na base, texto em cima, logo embaixo à direita.
+// ============================================================
+
+// Cor da marca — UMA variável única que recolore a onda e o degradê.
+// Por enquanto é uma cor padrão fixa; a extração do logo virá depois
+// (ex.: profile.analiseLogo.coresPrincipais[0]). Ver [[project-postfacil]].
+const COR_MARCA_PADRAO = "#9B1129";
+
+// Medidas exatas do desenho (mesmos números do SVG de referência).
+const LAYOUTS_NEGOCIO = {
+  A: {
+    onda: "M0,0 H1080 V14 C700,44 300,62 0,222 Z",
+    grad: { y: 985, h: 365, stops: [[0, 0], [0.55, 0.38], [1, 0.82]] },
+    logo: { top: 33 / 1350, left: 50 / 1080 },     // cartão claro em cima à esquerda
+    texto: { pos: "baixo" },                        // texto na faixa de baixo
+  },
+  B: {
+    onda: "M0,1350 L0,1336 C380,1306 780,1288 1080,1128 L1080,1350 Z",
+    grad: { y: 0, h: 365, stops: [[0, 0.82], [0.45, 0.38], [1, 0]] },
+    logo: { bottom: 33 / 1350, right: 50 / 1080 },  // cartão claro embaixo à direita
+    texto: { pos: "cima" },                         // texto na faixa de cima
+  },
+};
+
+// Alterna a variante do layout a cada post gerado (persiste entre sessões).
+function proximaVarianteNegocio() {
+  let idx = 0;
+  try {
+    idx = parseInt(localStorage.getItem("pf_layout_neg") || "0", 10) || 0;
+    localStorage.setItem("pf_layout_neg", String(idx + 1));
+  } catch { /* localStorage indisponível: começa em A */ }
+  return idx % 2 === 0 ? "A" : "B";
+}
+
+// Quebra o texto_imagem em até 2 linhas equilibradas (como no desenho).
+function quebrarEmLinhas(txt) {
+  const palavras = String(txt || "").trim().split(/\s+/).filter(Boolean);
+  if (palavras.length <= 1) return palavras;
+  let melhor = [palavras.join(" ")], menorDif = Infinity;
+  for (let i = 1; i < palavras.length; i++) {
+    const a = palavras.slice(0, i).join(" ");
+    const b = palavras.slice(i).join(" ");
+    const dif = Math.abs(a.length - b.length);
+    if (dif < menorDif) { menorDif = dif; melhor = [a, b]; }
+  }
+  return melhor;
+}
 
 // ============================================================
 // LANDING
@@ -460,57 +515,8 @@ function montarPerguntasRespostas(profile) {
     .join("\n");
 }
 
-// Traduz a "zona limpa" escolhida pela IA para o canto do logo na tela.
-function zonaParaCanto(zona) {
-  const z = (zona || "").toLowerCase();
-  if (z.includes("superior") && z.includes("esquerd")) return "tl";
-  if (z.includes("superior")) return "tr";
-  if (z.includes("inferior") && z.includes("esquerd")) return "bl";
-  if (z.includes("inferior")) return "br";
-  return "br"; // "centro" e demais → canto padrão para o selo do logo
-}
-
 // Sorteia um item de uma lista (usado para variar a cena da imagem).
 const escolherAleatorio = (arr) => arr[Math.floor(Math.random() * arr.length)];
-
-// Normaliza a "zona_texto" da IA (a faixa onde o texto é carimbado).
-// Aceita objeto {posicao, altura_pct} ou texto ("faixa inferior 30%").
-// Sempre devolve { posicao: "superior"|"inferior", alturaPct: 22..45 }.
-function parseZonaTexto(z) {
-  let posicao = "inferior";
-  let alturaPct = 30;
-  const ehCima = (s) => /superior|cima|topo|alto/.test(s);
-  if (z && typeof z === "object") {
-    if (ehCima(String(z.posicao || z.posição || "").toLowerCase())) posicao = "superior";
-    const n = parseInt(z.altura_pct ?? z.alturaPct, 10);
-    if (!isNaN(n)) alturaPct = n;
-  } else if (typeof z === "string") {
-    const s = z.toLowerCase();
-    if (ehCima(s)) posicao = "superior";
-    const m = s.match(/(\d{1,3})\s*%/);
-    if (m) alturaPct = parseInt(m[1], 10);
-  }
-  alturaPct = Math.min(45, Math.max(22, alturaPct)); // limites sãos
-  return { posicao, alturaPct };
-}
-
-// Lê a "metade_assunto" (metade da imagem onde fica o assunto principal).
-// Retorna "superior" | "inferior", ou null se a IA não informou.
-function parseMetade(m) {
-  if (m == null) return null;
-  const s = String(m).toLowerCase();
-  if (/superior|cima|topo|alto/.test(s)) return "superior";
-  if (/inferior|baixo|fundo|embaixo/.test(s)) return "inferior";
-  return null;
-}
-
-// Força o canto do logo para a faixa OPOSTA à do texto, para que nunca se
-// sobreponham. Mantém o lado horizontal (esquerda/direita) escolhido pela IA.
-function cantoOpostoAoTexto(canto, posicaoTexto) {
-  const horiz = canto.includes("l") ? "l" : "r";
-  const vert = posicaoTexto === "inferior" ? "t" : "b"; // texto embaixo → logo em cima
-  return vert + horiz;
-}
 
 // Normaliza hashtags (aceita array ou string) numa linha "#a #b #c".
 function normalizarHashtags(hashtags) {
@@ -546,16 +552,13 @@ async function gerarPostNegocioReal(profile) {
     "",
     "Responda SEMPRE em português do Brasil e APENAS com um JSON válido, sem texto antes ou depois, sem cercas de código. O JSON tem exatamente estas chaves:",
     '- "legenda": legenda do post para o Instagram, calorosa e profissional, coerente com o texto_imagem.',
-    '- "texto_imagem": texto CURTO (poucas palavras) que será carimbado por cima da imagem.',
-    '- "metade_assunto": em qual metade da imagem fica o ASSUNTO PRINCIPAL da cena. "superior" OU "inferior". ALTERNE entre posts.',
-    '- "descricao_fundo": descrição do cenário para a IA de imagem, SEM texto/letras/palavras na cena. Coloque o assunto principal na metade_assunto e descreva a metade OPOSTA como fundo limpo, neutro e desfocado, com espaço livre. Uso interno.',
-    '- "zona_texto": faixa onde o texto será carimbado, SEMPRE na metade OPOSTA ao metade_assunto (onde a imagem fica limpa). Objeto {"posicao": "superior" OU "inferior", "altura_pct": número de 25 a 40}. A posicao é o oposto de metade_assunto; VARIE a altura_pct.',
-    '- "zona_limpa": canto onde ficará o logo. Um de: "canto inferior direito", "canto inferior esquerdo", "canto superior direito", "canto superior esquerdo". VARIE a cada post. O logo fica sempre na faixa OPOSTA à do texto.',
+    '- "texto_imagem": texto CURTO (poucas palavras, cabe em até 2 linhas) que será aplicado por cima da imagem.',
+    '- "descricao_fundo": descrição do cenário para a IA de imagem, SEM texto/letras/palavras na cena. O assunto principal fica CENTRALIZADO (no miolo da imagem); o topo e a base ficam calmos, com fundo neutro e desfocado. Uso interno.',
     '- "cta": chamada para ação curta.',
     '- "hashtags": array de 4 a 6 hashtags do segmento (sem espaços dentro de cada uma).',
     "",
     "DIRETRIZES OBRIGATÓRIAS:",
-    "A. COORDENE cena e texto: decida a metade_assunto (onde fica o assunto) e ponha o texto na metade OPOSTA. A descricao_fundo DEVE deixar a metade do texto visualmente limpa — fundo neutro e desfocado, sem elementos importantes — para o texto ter onde respirar. O assunto principal NUNCA fica na faixa do texto.",
+    "A. A imagem recebe uma camada gráfica por cima: uma faixa colorida e um texto grande cobrem os 20% do topo e os 20% da base. Por isso a descricao_fundo DEVE manter o assunto principal inteiramente no miolo (60% centrais) e descrever o topo e a base como áreas calmas — fundo neutro, desfocado, sem elementos importantes.",
     "B. Tom profissional que impressione: use na descricao_fundo termos como iluminação profissional, composição cuidada, aparência premium, foco nítido, cores harmoniosas.",
     "C. VARIE A CENA a cada post: mude cenário, ângulo, enquadramento e composição na descricao_fundo. Evite repetir o mesmo clichê (ex.: não caia sempre em \"xícara sobre balcão de madeira\"). Mantenha sempre a fidelidade ao segmento e à identidade do negócio.",
     "",
@@ -574,7 +577,7 @@ async function gerarPostNegocioReal(profile) {
     "Respostas do onboarding do cliente:",
     qa || "(sem respostas registradas)",
     "",
-    "Lembre-se: alterne a metade_assunto entre posts (às vezes o assunto em cima, às vezes embaixo), ponha o texto sempre na metade oposta e varie a cena. Responda só com o JSON.",
+    "Lembre-se: mantenha o assunto centralizado no miolo, deixe o topo e a base calmos, e varie a cena a cada post. Responda só com o JSON.",
   ]
     .filter(Boolean)
     .join("\n");
@@ -582,22 +585,15 @@ async function gerarPostNegocioReal(profile) {
   const texto = await gerarTexto(system, user, 1200);
   const j = extrairJSON(texto);
 
-  // Faixa (em proporção) onde o texto será carimbado, indicada pela IA.
-  const zonaTexto = parseZonaTexto(j.zona_texto);
-  // Coerência cena↔texto: o texto vai SEMPRE na metade oposta ao assunto
-  // principal da imagem, para nunca cair por cima dele. Quando a IA informa a
-  // metade_assunto, forçamos a posicao do texto para o lado oposto (não confiamos
-  // só no prompt — o código garante).
-  const metadeAssunto = parseMetade(j.metade_assunto);
-  if (metadeAssunto) zonaTexto.posicao = metadeAssunto === "superior" ? "inferior" : "superior";
-  // O logo vai para a faixa OPOSTA à do texto, para não se sobreporem.
-  const canto = cantoOpostoAoTexto(zonaParaCanto(j.zona_limpa), zonaTexto.posicao);
-
   // Passo 3 da referência: a IA de imagem gera a imagem LIMPA (sem texto),
-  // recebendo só a descricao_fundo. O texto e o logo são aplicados por cima
-  // pelo código (o overlay da TelaResultado). Falha aqui NÃO derruba o post:
-  // sem imagem, cai no placeholder demo (gradiente).
-  const imagem = await gerarImagemLimpaNegocio(j, zonaTexto);
+  // recebendo só a descricao_fundo. A camada gráfica (onda, logo e texto) é
+  // aplicada por cima pelo overlay de layout fixo (TelaResultado). Falha aqui
+  // NÃO derruba o post: sem imagem, cai no placeholder demo (gradiente).
+  const imagem = await gerarImagemLimpaNegocio(j);
+
+  // A variante do layout alterna a cada post (A/B). A posição do texto e do
+  // logo é FIXA pelo desenho — não vem mais da IA.
+  const variante = proximaVarianteNegocio();
 
   // Mapeia o JSON real para o formato que a TelaResultado já sabe exibir.
   // descricao_fundo NÃO é exibida ao cliente (regra de negócio).
@@ -606,27 +602,20 @@ async function gerarPostNegocioReal(profile) {
     hashtags: normalizarHashtags(j.hashtags),
     destaque: (j.texto_imagem || "").trim(),
     sub: (j.cta || "").trim(),
-    canto,
-    zonaTexto,
+    variante,
     imagem,
   };
 }
 
 // Gera a imagem de fundo LIMPA (sem texto) a partir da descricao_fundo.
-// Reforça explicitamente "sem texto/letras/palavras" (a IA de imagem erra ao
-// escrever) e pede a zona_limpa neutra. Retorna null se falhar ou se a IA de
-// imagem estiver desligada — nesse caso a tela usa o placeholder demo.
-async function gerarImagemLimpaNegocio(j, zonaTexto) {
+// A composição é FIXA: o assunto fica no miolo (60% centrais) e as faixas de
+// topo e base ficam calmas, porque uma camada gráfica (faixa colorida + logo +
+// texto grande) será aplicada por cima delas. Retorna null se falhar ou se a
+// IA de imagem estiver desligada — nesse caso a tela usa o placeholder demo.
+async function gerarImagemLimpaNegocio(j) {
   if (!MODO_REAL_IMAGEM_NEGOCIO) return null;
   const fundo = (j.descricao_fundo || "").trim();
   if (!fundo) return null;
-
-  const faixaTexto = zonaTexto?.posicao === "superior" ? "superior" : "inferior";
-  const alturaTexto = zonaTexto?.alturaPct || 30;
-  // O texto já vem forçado para a metade oposta ao assunto; então o assunto
-  // (e o pequeno logo de canto) ficam na metade contrária à faixa do texto.
-  const metadeAssunto = faixaTexto === "superior" ? "inferior" : "superior";
-  const cantoLogo = metadeAssunto;
 
   // A IA de imagem é "sem memória" e converge para a mesma cena a cada chamada.
   // Sorteamos ângulo, enquadramento, composição e luz para forçar variação
@@ -652,9 +641,13 @@ async function gerarImagemLimpaNegocio(j, zonaTexto) {
     fundo,
     `Variação obrigatória desta geração: ${angulo}; ${enquadramento}; ${composicao}; ${luz}.`,
     "Crie uma CENA DIFERENTE das anteriores — outro cenário, ângulo, enquadramento e composição — mantendo o mesmo segmento e a identidade do negócio.",
-    `COMPOSIÇÃO: posicione o assunto principal na metade ${metadeAssunto} da imagem. A metade ${faixaTexto} (cerca de ${alturaTexto}% da altura) deve ficar visualmente LIMPA — fundo neutro e desfocado, sem elementos importantes — como espaço livre para o texto respirar.`,
-    `Deixe também o canto da metade ${cantoLogo} discreto para um pequeno logo.`,
-    "SEM TEXTO, SEM LETRAS, SEM PALAVRAS, sem números e sem logotipos na imagem.",
+    // Regra de composição — explica o MOTIVO, não só a regra: a imagem receberá
+    // uma camada gráfica por cima, então certas áreas precisam ficar livres.
+    "COMPOSIÇÃO PARA CAMADA GRÁFICA (regra mais importante): esta imagem vai receber uma camada gráfica por cima. Os 20% do topo e os 20% da base desta imagem serão cobertos por uma faixa colorida, pelo logo da marca e por um texto grande. Por isso essas duas áreas precisam ficar visualmente calmas: sem nada importante, sem detalhe fino, sem alto contraste.",
+    "Todo o assunto principal — produto, pessoa, animal, rostos, mãos — deve ficar inteiramente dentro dos 60% centrais. Se o assunto for um animal ou uma pessoa, enquadre de modo que a cabeça e o rosto fiquem no miolo, nunca nas faixas de cima ou de baixo.",
+    "O que PODE aparecer nas faixas de cima e de baixo: fundo desfocado, parede lisa, superfície vazia, céu, bokeh, sombra suave, degradê natural de luz.",
+    "O que NÃO PODE aparecer nas faixas: rostos, olhos, o produto em si, mãos, letreiros ou qualquer texto, e elementos com muito detalhe ou contraste forte.",
+    "A imagem continua limpa: SEM TEXTO, SEM LETRAS, SEM PALAVRAS, sem números e sem logotipos.",
     "Qualidade profissional: iluminação cuidada, composição harmoniosa, aparência premium, foco nítido.",
   ].join(" ");
 
@@ -857,6 +850,75 @@ function TelaCarregamento() {
   );
 }
 
+// ---- Segunda camada (overlay) do post de Negócio — LAYOUT FIXO (Seção 5) ----
+// Reproduz layouts-post-facil.html: a onda e o degradê (SVG, recoloridos pela
+// cor da marca) entram por baixo; o cartão do logo e o texto grande (HTML, sem
+// distorção em 4:5 nem 9:16) entram por cima, nas posições fixas do desenho.
+// As medidas em cqi acompanham a LARGURA do card (o container precisa de
+// containerType: "inline-size").
+function OverlayNegocio({ variante, cor, logo, destaque }) {
+  const L = LAYOUTS_NEGOCIO[variante] || LAYOUTS_NEGOCIO.A;
+  const linhas = quebrarEmLinhas(destaque);
+  const gid = "pfgrad-" + variante;
+
+  // Cartão claro do logo: quadrado (lado em cqi = % da largura), posição fixa.
+  const ladoCartao = (222 / 1080) * 100; // ~20.56% da largura
+  const posCartao = { position: "absolute", width: ladoCartao + "cqi", height: ladoCartao + "cqi" };
+  if (L.logo.top != null) posCartao.top = L.logo.top * 100 + "%";
+  if (L.logo.bottom != null) posCartao.bottom = L.logo.bottom * 100 + "%";
+  if (L.logo.left != null) posCartao.left = L.logo.left * 100 + "%";
+  if (L.logo.right != null) posCartao.right = L.logo.right * 100 + "%";
+
+  // Faixa do texto (cima ou baixo), ancorada na respectiva borda.
+  const boxTexto = {
+    position: "absolute", left: 0, right: 0,
+    [L.texto.pos === "cima" ? "top" : "bottom"]: "2.5%",
+    display: "flex", flexDirection: "column", alignItems: "center",
+    justifyContent: L.texto.pos === "cima" ? "flex-start" : "flex-end",
+    padding: "0 6%", textAlign: "center", pointerEvents: "none",
+  };
+
+  return (
+    <>
+      {/* onda + degradê recoloridos pela cor da marca (uma variável única) */}
+      <svg viewBox="0 0 1080 1350" preserveAspectRatio="none"
+           style={{ position: "absolute", inset: 0, width: "100%", height: "100%", pointerEvents: "none" }}>
+        <defs>
+          <linearGradient id={gid} x1="0" y1="0" x2="0" y2="1">
+            {L.grad.stops.map(([off, op], k) => (
+              <stop key={k} offset={off} stopColor={cor} stopOpacity={op} />
+            ))}
+          </linearGradient>
+        </defs>
+        <rect x="0" y={L.grad.y} width="1080" height={L.grad.h} fill={`url(#${gid})`} />
+        <path d={L.onda} fill={cor} />
+      </svg>
+
+      {/* cartão claro com o logo do cliente (ou "LOGO" de exemplo) */}
+      <div style={{ ...posCartao, borderRadius: "2.8cqi", background: "#EFE6D9",
+                    boxShadow: "0 4px 14px rgba(0,0,0,.18)", padding: "6%",
+                    display: "flex", alignItems: "center", justifyContent: "center", overflow: "hidden" }}>
+        {logo
+          ? <img src={logo} alt="logo" style={{ width: "100%", height: "100%", objectFit: "contain" }} />
+          : <span style={{ color: "#9a9086", fontWeight: 700, fontSize: "3.2cqi", letterSpacing: "0.15em" }}>LOGO</span>}
+      </div>
+
+      {/* texto grande na faixa reservada, com a sombra difusa do desenho */}
+      <div style={boxTexto}>
+        {linhas.map((linha, k) => (
+          <div key={k} style={{
+                color: "#fff", fontWeight: 900, fontSize: "8.1cqi", lineHeight: 1.05,
+                letterSpacing: "-0.02em",
+                textShadow: "0 0.5cqi 1.2cqi rgba(0,0,0,.62), 0 0.2cqi 0.5cqi rgba(0,0,0,.5)",
+                fontFamily: "'Arial Black','Helvetica Neue',system-ui,sans-serif" }}>
+            {linha}
+          </div>
+        ))}
+      </div>
+    </>
+  );
+}
+
 // ---- Tela de resultado (Seção 5) + card WhatsApp (Seção 7) ----
 function TelaResultado({ tipo, profile, campos, formato, resultado, onNovaVersao, onSair }) {
   const [toast, showToast] = useToast();
@@ -868,8 +930,10 @@ function TelaResultado({ tipo, profile, campos, formato, resultado, onNovaVersao
     bl: { bottom: 12, left: 12 }, br: { bottom: 12, right: 12 },
   }[r.canto || "br"];
 
-  // Posiciona o texto DENTRO da faixa reservada pela IA (zona_texto), em vez
-  // de fixá-lo no centro. Sem zona_texto (posts demo), mantém o centro antigo.
+  // Post de Negócio real → camada gráfica de LAYOUT FIXO (OverlayNegocio),
+  // que alterna entre as variantes A/B. Demais posts (demo) mantêm o texto
+  // centralizado/no canto como antes.
+  const usarOverlay = !!r.variante;
   const zt = r.zonaTexto;
   const temFundo = !!(midia || r.imagem);
   const textoBox = zt
@@ -912,20 +976,26 @@ function TelaResultado({ tipo, profile, campos, formato, resultado, onNovaVersao
 
         {/* card do post */}
         <div style={{ margin: "18px 20px", background: "#fff", borderRadius: 18, boxShadow: "0 6px 20px rgba(0,59,160,.12)", overflow: "hidden" }}>
-          <div style={{ width: "100%", aspectRatio: aspect, background: "linear-gradient(135deg,#ffd89b,#ff6b6b 60%,#c0392b)", position: "relative", overflow: "hidden" }}>
-            {/* fundo LIMPO da nossa IA (post de Negócio); texto e logo entram por cima */}
+          <div style={{ width: "100%", aspectRatio: aspect, background: "linear-gradient(135deg,#ffd89b,#ff6b6b 60%,#c0392b)", position: "relative", overflow: "hidden", containerType: "inline-size" }}>
+            {/* fundo LIMPO da nossa IA (post de Negócio); a camada gráfica entra por cima */}
             {r.imagem && <img src={r.imagem} alt="" style={{ position: "absolute", inset: 0, width: "100%", height: "100%", objectFit: "cover" }} />}
             {midia && (midia.isVideo
               ? <video src={midia.url} style={{ position: "absolute", inset: 0, width: "100%", height: "100%", objectFit: "cover" }} muted playsInline />
               : <img src={midia.url} alt="" style={{ position: "absolute", inset: 0, width: "100%", height: "100%", objectFit: "cover" }} />)}
-            <div style={textoBox}>
-              <div style={{ fontSize: 34, fontWeight: 900, textShadow: "0 2px 8px rgba(0,0,0,.4)", lineHeight: 1.05 }}>{r.destaque}</div>
-              <div style={{ fontSize: 15, fontWeight: 700, marginTop: 10, background: "rgba(0,0,0,.25)", padding: "5px 14px", borderRadius: 20 }}>{r.sub}</div>
-            </div>
-            {profile.logo && (
-              <div style={{ position: "absolute", ...cantoPos, width: 46, height: 46, borderRadius: 10, background: "#fff", padding: 4, boxSizing: "border-box", boxShadow: "0 2px 8px rgba(0,0,0,.25)" }}>
-                <img src={profile.logo} alt="logo" style={{ width: "100%", height: "100%", objectFit: "contain" }} />
-              </div>
+            {usarOverlay ? (
+              <OverlayNegocio variante={r.variante} cor={COR_MARCA_PADRAO} logo={profile.logo} destaque={r.destaque} />
+            ) : (
+              <>
+                <div style={textoBox}>
+                  <div style={{ fontSize: 34, fontWeight: 900, textShadow: "0 2px 8px rgba(0,0,0,.4)", lineHeight: 1.05 }}>{r.destaque}</div>
+                  <div style={{ fontSize: 15, fontWeight: 700, marginTop: 10, background: "rgba(0,0,0,.25)", padding: "5px 14px", borderRadius: 20 }}>{r.sub}</div>
+                </div>
+                {profile.logo && (
+                  <div style={{ position: "absolute", ...cantoPos, width: 46, height: 46, borderRadius: 10, background: "#fff", padding: 4, boxSizing: "border-box", boxShadow: "0 2px 8px rgba(0,0,0,.25)" }}>
+                    <img src={profile.logo} alt="logo" style={{ width: "100%", height: "100%", objectFit: "contain" }} />
+                  </div>
+                )}
+              </>
             )}
           </div>
           <div style={{ padding: 16, fontSize: 13, color: "#16323F", lineHeight: 1.6, borderTop: "1px solid #eef" }}>
