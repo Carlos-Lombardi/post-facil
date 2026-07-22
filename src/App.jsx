@@ -3,14 +3,15 @@
 // ============================================================
 import { useState, useRef, useMemo, useEffect } from "react";
 import Onboarding from "./Onboarding.jsx";
-import { criarFicha, salvarFicha, carregarFicha } from "./ficha.js";
+import { criarFicha, salvarFicha, carregarFicha, garantirClienteId } from "./ficha.js";
 import { DADOS } from "./dados.js";
 import { gerarTexto, gerarImagem } from "./api.js";
+import { analisarCorDoLogo, escurecerParaContraste } from "./cor.js";
 import {
   PostFacilLogo, AppHeader, Toast, useToast, QuotaBar,
   ADMIN_PASS, DEFAULT_CODES, getDefaultLimits, getOverrides,
   saudacaoMotivacional, incPostCreditos, mensagemCreditos, podeGerarPost,
-  getWppConfig, saveWppConfig, doCopy,
+  getWppConfig, saveWppConfig, doCopy, chaveCliente,
 } from "./shared.jsx";
 import logoPostFacil from "./assets/logo-postfacil.png";
 import bannerCatalogo from "./assets/banner-catalogo.jpg";
@@ -44,9 +45,17 @@ const MODO_REAL_IMAGEM_NEGOCIO = true;
 // ============================================================
 
 // Cor da marca — UMA variável única que recolore a onda e o degradê.
-// Por enquanto é uma cor padrão fixa; a extração do logo virá depois
-// (ex.: profile.analiseLogo.coresPrincipais[0]). Ver [[project-postfacil]].
+// Fallback usado só quando o cliente ainda não tem cor extraída do logo.
 const COR_MARCA_PADRAO = "#9B1129";
+
+// Cor que o layout do post de Negócio usa (texto branco por cima): prefere a
+// versão já ajustada para contraste; se só houver a original do cliente, ajusta
+// na hora; senão cai no padrão. A extração/ajuste mora em cor.js.
+function corDeLayout(profile) {
+  if (profile?.corMarcaLayout) return profile.corMarcaLayout;
+  if (profile?.corMarca) return escurecerParaContraste(profile.corMarca);
+  return COR_MARCA_PADRAO;
+}
 
 // Medidas exatas do desenho (mesmos números do SVG de referência).
 const LAYOUTS_NEGOCIO = {
@@ -72,6 +81,65 @@ function proximaVarianteNegocio() {
     localStorage.setItem("pf_layout_neg", String(idx + 1));
   } catch { /* localStorage indisponível: começa em A */ }
   return idx % 2 === 0 ? "A" : "B";
+}
+
+// ============================================================
+// HISTÓRICO ANTI-REPETIÇÃO — POST DE NEGÓCIO
+// Guarda, POR CLIENTE, um resumo curto (só texto, nunca a imagem)
+// dos últimos posts, para que a próxima geração seja claramente
+// diferente e o feed não fique repetitivo. Hoje mora no localStorage;
+// quando migrar pro backend, só estas funções mudam.
+// ============================================================
+const HIST_NEG_MAX = 5; // guardamos só os últimos 5 posts do cliente
+
+// Chave por cliente (nunca global), ancorada no identificador estável do
+// cliente (clienteId) — a mesma âncora dos créditos/cota/config. Ver
+// idCliente/chaveCliente em shared.jsx.
+function chaveHistNegocio(profile) {
+  return chaveCliente(profile, "pf_hist_neg_");
+}
+
+// Lê o histórico do cliente. Se algo falhar, registra e segue com [].
+function lerHistoricoNegocio(profile) {
+  try {
+    const raw = localStorage.getItem(chaveHistNegocio(profile));
+    const arr = raw ? JSON.parse(raw) : [];
+    return Array.isArray(arr) ? arr : [];
+  } catch (e) {
+    console.error("Falha ao ler histórico do post de Negócio:", e);
+    return [];
+  }
+}
+
+// Registra o post recém-gerado e mantém só os últimos HIST_NEG_MAX
+// (slice descarta o mais antigo). Se o salvamento falhar, registra o
+// erro e SEGUE funcionando — nunca com catch vazio.
+function registrarPostNegocio(profile, resumo) {
+  try {
+    const hist = lerHistoricoNegocio(profile);
+    hist.push({ ...resumo, em: new Date().toISOString() });
+    const ultimos = hist.slice(-HIST_NEG_MAX);
+    localStorage.setItem(chaveHistNegocio(profile), JSON.stringify(ultimos));
+  } catch (e) {
+    console.error("Falha ao salvar histórico do post de Negócio:", e);
+    // O post continua normalmente; só não fica registrado no histórico.
+  }
+}
+
+// Monta o trecho do prompt (texto) que leva o histórico à nossa IA, com
+// a instrução explícita e o MOTIVO de variar. Vazio quando não há histórico.
+function blocoHistoricoParaTexto(hist) {
+  if (!hist.length) return "";
+  const linhas = hist.map((h, i) =>
+    `${i + 1}. Cena: ${h.resumoCena || "-"} | Tema do texto: ${h.temaTexto || "-"}`
+    + ` | Tom: ${h.tom || "-"} | Layout: ${h.variante || "-"}, cor ${h.corDestaque || "-"}`
+  ).join("\n");
+  return [
+    "",
+    "HISTÓRICO ANTI-REPETIÇÃO (últimos posts DESTE cliente, do mais antigo ao mais recente):",
+    linhas,
+    "MOTIVO: estas foram as últimas cenas e temas usados por este cliente; crie algo CLARAMENTE DIFERENTE das cenas e dos temas acima — outro assunto/cenário/enquadramento na imagem e outro ângulo de texto — para o feed dele não ficar repetitivo.",
+  ].join("\n");
 }
 
 // Quebra o texto_imagem em até 2 linhas equilibradas (como no desenho).
@@ -546,6 +614,10 @@ async function gerarPostNegocioReal(profile) {
   const cores = (profile.analiseLogo?.coresPrincipais || []).join(", ");
   const estiloLogo = profile.analiseLogo?.estilo || "";
 
+  // Histórico anti-repetição DESTE cliente (últimos posts). Lido antes de
+  // chamar a nossa IA para orientá-la a criar algo diferente.
+  const hist = lerHistoricoNegocio(profile);
+
   const system = [
     "Você é o diretor de arte do Post Fácil, um app que cria posts profissionais de Instagram para pequenos negócios brasileiros.",
     "Você PENSA A PEÇA INTEIRA DE UMA VEZ (imagem, texto da imagem e legenda nascem do mesmo raciocínio, coerentes entre si).",
@@ -576,6 +648,7 @@ async function gerarPostNegocioReal(profile) {
     "",
     "Respostas do onboarding do cliente:",
     qa || "(sem respostas registradas)",
+    blocoHistoricoParaTexto(hist),
     "",
     "Lembre-se: mantenha o assunto centralizado no miolo, deixe o topo e a base calmos, e varie a cena a cada post. Responda só com o JSON.",
   ]
@@ -589,11 +662,23 @@ async function gerarPostNegocioReal(profile) {
   // recebendo só a descricao_fundo. A camada gráfica (onda, logo e texto) é
   // aplicada por cima pelo overlay de layout fixo (TelaResultado). Falha aqui
   // NÃO derruba o post: sem imagem, cai no placeholder demo (gradiente).
-  const imagem = await gerarImagemLimpaNegocio(j);
+  // Passa as cenas já usadas por este cliente para a IA de imagem evitá-las.
+  const historicoCenas = hist.map((h) => h.resumoCena).filter(Boolean);
+  const { imagem, resumoCena } = await gerarImagemLimpaNegocio(j, historicoCenas);
 
   // A variante do layout alterna a cada post (A/B). A posição do texto e do
   // logo é FIXA pelo desenho — não vem mais da IA.
   const variante = proximaVarianteNegocio();
+
+  // Registra este post no histórico anti-repetição (só texto, nunca a imagem)
+  // para orientar as próximas gerações deste cliente.
+  registrarPostNegocio(profile, {
+    resumoCena,
+    temaTexto: [(j.texto_imagem || "").trim(), (j.cta || "").trim()].filter(Boolean).join(" · "),
+    tom: tons,
+    variante,
+    corDestaque: corDeLayout(profile),
+  });
 
   // Mapeia o JSON real para o formato que a TelaResultado já sabe exibir.
   // descricao_fundo NÃO é exibida ao cliente (regra de negócio).
@@ -610,12 +695,11 @@ async function gerarPostNegocioReal(profile) {
 // Gera a imagem de fundo LIMPA (sem texto) a partir da descricao_fundo.
 // A composição é FIXA: o assunto fica no miolo (60% centrais) e as faixas de
 // topo e base ficam calmas, porque uma camada gráfica (faixa colorida + logo +
-// texto grande) será aplicada por cima delas. Retorna null se falhar ou se a
-// IA de imagem estiver desligada — nesse caso a tela usa o placeholder demo.
-async function gerarImagemLimpaNegocio(j) {
-  if (!MODO_REAL_IMAGEM_NEGOCIO) return null;
+// texto grande) será aplicada por cima delas. Retorna { imagem, resumoCena }:
+// imagem é null se falhar ou se a IA de imagem estiver desligada (a tela usa o
+// placeholder demo), e resumoCena alimenta o histórico anti-repetição do cliente.
+async function gerarImagemLimpaNegocio(j, historicoCenas = []) {
   const fundo = (j.descricao_fundo || "").trim();
-  if (!fundo) return null;
 
   // A IA de imagem é "sem memória" e converge para a mesma cena a cada chamada.
   // Sorteamos ângulo, enquadramento, composição e luz para forçar variação
@@ -637,10 +721,23 @@ async function gerarImagemLimpaNegocio(j) {
     "iluminação de estúdio suave", "manhã clara e arejada",
   ]);
 
+  // Resumo curto da cena desta geração (só texto) — alimenta o histórico.
+  const resumoCena = fundo
+    ? `${fundo} — ${angulo}, ${enquadramento}, ${composicao}, ${luz}`
+    : "";
+
+  // IA de imagem desligada ou sem descrição: sem imagem, mas devolvemos o
+  // resumo (ainda útil para o histórico anti-repetição do texto).
+  if (!MODO_REAL_IMAGEM_NEGOCIO || !fundo) return { imagem: null, resumoCena };
+
   const prompt = [
     fundo,
     `Variação obrigatória desta geração: ${angulo}; ${enquadramento}; ${composicao}; ${luz}.`,
     "Crie uma CENA DIFERENTE das anteriores — outro cenário, ângulo, enquadramento e composição — mantendo o mesmo segmento e a identidade do negócio.",
+    historicoCenas.length
+      ? "EVITE estas cenas já usadas por este cliente (crie algo claramente diferente delas): "
+        + historicoCenas.map((c, i) => `(${i + 1}) ${c}`).join("; ") + "."
+      : "",
     // Regra de composição — explica o MOTIVO, não só a regra: a imagem receberá
     // uma camada gráfica por cima, então certas áreas precisam ficar livres.
     "COMPOSIÇÃO PARA CAMADA GRÁFICA (regra mais importante): esta imagem vai receber uma camada gráfica por cima. Os 20% do topo e os 20% da base desta imagem serão cobertos por uma faixa colorida, pelo logo da marca e por um texto grande. Por isso essas duas áreas precisam ficar visualmente calmas: sem nada importante, sem detalhe fino, sem alto contraste.",
@@ -655,10 +752,11 @@ async function gerarImagemLimpaNegocio(j) {
   const size = "1024x1536";
 
   try {
-    return await gerarImagem(prompt, size);
+    const imagem = await gerarImagem(prompt, size);
+    return { imagem, resumoCena };
   } catch (e) {
     console.error("Geração de imagem falhou, usando placeholder:", e);
-    return null;
+    return { imagem: null, resumoCena };
   }
 }
 
@@ -990,7 +1088,7 @@ function TelaResultado({ tipo, profile, campos, formato, resultado, onNovaVersao
               ? <video src={midia.url} style={{ position: "absolute", inset: 0, width: "100%", height: "100%", objectFit: "cover" }} muted playsInline />
               : <img src={midia.url} alt="" style={{ position: "absolute", inset: 0, width: "100%", height: "100%", objectFit: "cover" }} />)}
             {usarOverlay ? (
-              <OverlayNegocio variante={r.variante} cor={COR_MARCA_PADRAO} logo={profile.logo} destaque={r.destaque} />
+              <OverlayNegocio variante={r.variante} cor={corDeLayout(profile)} logo={profile.logo} destaque={r.destaque} />
             ) : (
               <>
                 <div style={textoBox}>
@@ -1127,6 +1225,7 @@ function EditarPerfil({ profile, onSalvar, onVoltar }) {
   const [whatsapp, setWhatsapp] = useState(profile.whatsapp || "");
   const [tons,     setTons]     = useState(profile.tons || []);
   const [logo,     setLogo]     = useState(profile.logo || null);
+  const [corMarca, setCorMarca] = useState(profile.corMarca || "");
   const [segmento, setSegmento] = useState({ id: profile.segmentoId, nome: profile.segmentoNome });
   const [respostas, setRespostas] = useState(profile.respostas || {});
   const [perguntas, setPerguntas] = useState(() => getPerguntasDoSegmento(tipo, profile.segmentoId));
@@ -1170,9 +1269,25 @@ function EditarPerfil({ profile, onSalvar, onVoltar }) {
     const f = e.target.files?.[0];
     if (!f) return;
     const reader = new FileReader();
-    reader.onload = () => setLogo(reader.result);
+    reader.onload = async () => {
+      setLogo(reader.result);
+      // Sugere a cor da marca detectada do novo logo (o cliente pode ajustar).
+      const cores = await analisarCorDoLogo(reader.result);
+      if (cores) setCorMarca(cores.original);
+    };
     reader.readAsDataURL(f);
   }
+
+  // Backfill: logos antigos (salvos antes deste recurso) ainda não têm cor.
+  // Ao abrir a edição, detecta uma sugestão a partir do logo já existente.
+  useEffect(() => {
+    if (!logo || corMarca) return;
+    let vivo = true;
+    analisarCorDoLogo(logo).then((c) => { if (vivo && c) setCorMarca(c.original); });
+    return () => { vivo = false; };
+    // roda só na montagem (sugestão inicial); depois o cliente controla a cor
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   function tentarTrocarSeg(seg) {
     if (seg.id === segmento.id) { setMostrarLista(false); return; }
@@ -1191,6 +1306,9 @@ function EditarPerfil({ profile, onSalvar, onVoltar }) {
   }
 
   function salvar() {
+    // Grava a cor escolhida pelo cliente (original) e a versão ajustada para
+    // o layout (texto branco legível por cima). Recalcula a ajustada na hora.
+    const corLayout = corMarca ? escurecerParaContraste(corMarca) : null;
     onSalvar({
       ...profile,
       nomePessoa: nomePessoa.trim(),
@@ -1199,6 +1317,8 @@ function EditarPerfil({ profile, onSalvar, onVoltar }) {
       tons,
       logo,
       criarLogoDepois: !logo,
+      corMarca: corMarca || null,
+      corMarcaLayout: corLayout,
       segmentoId: segmento.id,
       segmentoNome: segmento.nome,
       respostas,
@@ -1298,6 +1418,25 @@ function EditarPerfil({ profile, onSalvar, onVoltar }) {
           </button>
         )}
         <input ref={fileRef} type="file" accept="image/*" onChange={escolherLogo} style={{ display: "none" }} />
+
+        {/* COR DA MARCA */}
+        <div style={{ marginTop: 20 }}>
+          {rot("Cor da marca")}
+          <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+            <input
+              type="color"
+              value={corMarca || COR_MARCA_PADRAO}
+              onChange={(e) => setCorMarca(e.target.value)}
+              aria-label="Cor da marca"
+              style={{ width: 54, height: 46, flexShrink: 0, border: "1.5px solid #E4EEF3", borderRadius: 12, background: "white", cursor: "pointer", padding: 3 }}
+            />
+            <div style={{ flex: 1, fontSize: 12.5, color: "#5C7686", fontWeight: 600, lineHeight: 1.45 }}>
+              {corMarca
+                ? "Detectada do seu logo. O texto do post fica branco por cima dela — ajuste se quiser."
+                : "Escolha a cor que representa sua marca. O texto do post fica branco por cima dela."}
+            </div>
+          </div>
+        </div>
 
         {/* RESPOSTAS */}
         {secH("Respostas")}
@@ -1492,7 +1631,7 @@ function Admin({ onClose }) {
 // ============================================================
 export default function App() {
   const [page, setPage] = useState(() => (carregarFicha() ? "home" : "landing"));
-  const [profile, setProfile] = useState(() => carregarFicha());
+  const [profile, setProfile] = useState(() => garantirClienteId(carregarFicha()));
   const [clicks, setClicks] = useState(0);
   const ct = useRef(null);
 
@@ -1504,16 +1643,27 @@ export default function App() {
     ct.current = setTimeout(() => setClicks(0), 1500);
   };
 
-  function concluirOnboarding(dados) {
+  async function concluirOnboarding(dados) {
     if (dados && dados.acao === "criar_logo") return;
-    const ficha = criarFicha(dados);
+    let ficha = criarFicha(dados);
+    // Extrai a cor da marca do logo (no navegador) e guarda junto da ficha,
+    // para não recalcular a cada post. Se falhar, segue sem cor (usa o padrão).
+    if (ficha.logo && !ficha.corMarca) {
+      const cores = await analisarCorDoLogo(ficha.logo);
+      if (cores) ficha = { ...ficha, corMarca: cores.original, corMarcaLayout: cores.layout };
+    }
     salvarFicha(ficha);
     setProfile(ficha);
     // navegação acontece via onIrParaDashboard na TelaFim
   }
 
-  function atualizarLogo(novoLogo) {
-    const fichaAtualizada = { ...profile, logo: novoLogo, criarLogoDepois: false };
+  async function atualizarLogo(novoLogo) {
+    // Logo novo → recalcula a cor da marca a partir dele.
+    const cores = novoLogo ? await analisarCorDoLogo(novoLogo) : null;
+    const fichaAtualizada = {
+      ...profile, logo: novoLogo, criarLogoDepois: false,
+      ...(cores ? { corMarca: cores.original, corMarcaLayout: cores.layout } : {}),
+    };
     salvarFicha(fichaAtualizada);
     setProfile(fichaAtualizada);
   }

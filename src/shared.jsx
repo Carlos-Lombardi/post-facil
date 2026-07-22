@@ -7,6 +7,44 @@ import { useState, useRef } from "react";
 export const ADMIN_PASS = "postfacil2024";
 export const DEFAULT_CODES = ["PREM-2024-DEMO"];
 
+// ============================================================
+// IDENTIFICADOR ROBUSTO DE CLIENTE
+// Âncora ÚNICA de todos os dados por cliente (créditos, cota, config
+// de WhatsApp, histórico). Prefere o clienteId estável da ficha — que
+// NÃO muda se o cliente editar o WhatsApp depois. Cai para o WhatsApp
+// só com dígitos e, apenas em último caso, para "anon".
+// ============================================================
+export function idCliente(profile) {
+  if (profile?.clienteId) return profile.clienteId;
+  const digitos = String(profile?.whatsapp || "").replace(/\D/g, "");
+  if (digitos) return "w" + digitos;
+  return "anon";
+}
+
+// Retorna a chave "<prefixo><idCliente>" e, na PRIMEIRA vez, migra os dados
+// da chave antiga baseada no WhatsApp ("<prefixo><whatsapp>") para a nova —
+// assim créditos/cota/config não "resetam" ao unificar tudo no clienteId.
+// Falha de migração é registrada no console e NÃO derruba nada (nunca catch vazio).
+export function chaveCliente(profile, prefixo) {
+  const novaChave = prefixo + idCliente(profile);
+  const wpp = profile?.whatsapp;
+  if (wpp) {
+    const antiga = prefixo + wpp;
+    if (antiga !== novaChave) {
+      try {
+        const dado = localStorage.getItem(antiga);
+        if (dado !== null && localStorage.getItem(novaChave) === null) {
+          localStorage.setItem(novaChave, dado);
+          localStorage.removeItem(antiga);
+        }
+      } catch (e) {
+        console.error("Falha ao migrar '" + prefixo + "' para o clienteId:", e);
+      }
+    }
+  }
+  return novaChave;
+}
+
 // ---- cota de imagens (mantida do original) ----
 export function getDefaultLimits() {
   try {
@@ -33,7 +71,7 @@ export function getLimits(profile) {
   return getDefaultLimits()[profile.plano] || { daily: 0, monthly: 0 };
 }
 export function getQuota(profile) {
-  const key = "pf_quota_" + profile.whatsapp;
+  const key = chaveCliente(profile, "pf_quota_");
   const today = new Date().toISOString().slice(0, 10);
   const month = new Date().toISOString().slice(0, 7);
   try {
@@ -52,7 +90,7 @@ export function getQuota(profile) {
   }
 }
 export function saveQuota(profile, q) {
-  localStorage.setItem("pf_quota_" + profile.whatsapp, JSON.stringify(q));
+  localStorage.setItem(chaveCliente(profile, "pf_quota_"), JSON.stringify(q));
 }
 export function canGenImg(profile) {
   const lim = getLimits(profile);
@@ -80,7 +118,7 @@ export const POST_LIMITE_MES = 92;
 export const POST_MES_CONHECIDO = 90;
 
 export function getPostCreditos(profile) {
-  const key = "pf_posts_" + (profile?.whatsapp || "anon");
+  const key = chaveCliente(profile, "pf_posts_");
   const today = new Date().toISOString().slice(0, 10);
   const month = new Date().toISOString().slice(0, 7);
   try {
@@ -96,7 +134,11 @@ export function incPostCreditos(profile) {
   const c = getPostCreditos(profile);
   c.dayCount++;
   c.monthCount++;
-  try { localStorage.setItem("pf_posts_" + (profile?.whatsapp || "anon"), JSON.stringify(c)); } catch {}
+  try {
+    localStorage.setItem(chaveCliente(profile, "pf_posts_"), JSON.stringify(c));
+  } catch (e) {
+    console.error("Falha ao salvar créditos de post:", e);
+  }
   return c;
 }
 // dias até a renovação (fim do mês corrente)
@@ -157,14 +199,19 @@ export function saudacaoMotivacional(nomePessoa) {
 // ============================================================
 export function getWppConfig(profile) {
   try {
-    return JSON.parse(localStorage.getItem("pf_wpp_" + (profile?.whatsapp || "anon")) || "null") ||
+    return JSON.parse(localStorage.getItem(chaveCliente(profile, "pf_wpp_")) || "null") ||
       { ativo: false, hora: "09:00", formato: "alternar" };
-  } catch {
+  } catch (e) {
+    console.error("Falha ao ler config de WhatsApp:", e);
     return { ativo: false, hora: "09:00", formato: "alternar" };
   }
 }
 export function saveWppConfig(profile, cfg) {
-  try { localStorage.setItem("pf_wpp_" + (profile?.whatsapp || "anon"), JSON.stringify(cfg)); } catch {}
+  try {
+    localStorage.setItem(chaveCliente(profile, "pf_wpp_"), JSON.stringify(cfg));
+  } catch (e) {
+    console.error("Falha ao salvar config de WhatsApp:", e);
+  }
   return cfg;
 }
 
