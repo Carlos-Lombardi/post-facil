@@ -54,13 +54,13 @@ const LAYOUTS_NEGOCIO = {
     onda: "M0,0 H1080 V14 C700,44 300,62 0,222 Z",
     grad: { y: 985, h: 365, stops: [[0, 0], [0.55, 0.38], [1, 0.82]] },
     logo: { top: 33 / 1350, left: 50 / 1080 },     // cartão claro em cima à esquerda
-    texto: { pos: "baixo" },                        // texto na faixa de baixo
+    texto: { pos: "baixo", offset: 2.4 },           // baselines 1192/1290 → ~2,4% do fundo
   },
   B: {
     onda: "M0,1350 L0,1336 C380,1306 780,1288 1080,1128 L1080,1350 Z",
     grad: { y: 0, h: 365, stops: [[0, 0.82], [0.45, 0.38], [1, 0]] },
     logo: { bottom: 33 / 1350, right: 50 / 1080 },  // cartão claro embaixo à direita
-    texto: { pos: "cima" },                         // texto na faixa de cima
+    texto: { pos: "cima", offset: 5.9 },            // baselines 150/248 → ~5,9% do topo
   },
 };
 
@@ -861,21 +861,26 @@ function OverlayNegocio({ variante, cor, logo, destaque }) {
   const linhas = quebrarEmLinhas(destaque);
   const gid = "pfgrad-" + variante;
 
-  // Cartão claro do logo: quadrado (lado em cqi = % da largura), posição fixa.
+  // Cartão claro do logo: quadrado de 222/1080 = 20,56% da largura (222×222 no
+  // viewBox 1080×1350). box-sizing border-box para o padding NÃO somar à largura
+  // (o app não tem reset global de box-sizing); assim o cartão fica exatamente
+  // em 20,56cqi, sem escala extra. Padding em cqi só para o logo respirar dentro.
   const ladoCartao = (222 / 1080) * 100; // ~20.56% da largura
-  const posCartao = { position: "absolute", width: ladoCartao + "cqi", height: ladoCartao + "cqi" };
+  const posCartao = {
+    position: "absolute", boxSizing: "border-box",
+    width: ladoCartao + "cqi", height: ladoCartao + "cqi",
+  };
   if (L.logo.top != null) posCartao.top = L.logo.top * 100 + "%";
   if (L.logo.bottom != null) posCartao.bottom = L.logo.bottom * 100 + "%";
   if (L.logo.left != null) posCartao.left = L.logo.left * 100 + "%";
   if (L.logo.right != null) posCartao.right = L.logo.right * 100 + "%";
 
-  // Faixa do texto (cima ou baixo), ancorada na respectiva borda.
+  // Faixa do texto (cima ou baixo), ancorada na borda com o offset do desenho.
   const boxTexto = {
     position: "absolute", left: 0, right: 0,
-    [L.texto.pos === "cima" ? "top" : "bottom"]: "2.5%",
+    [L.texto.pos === "cima" ? "top" : "bottom"]: L.texto.offset + "%",
     display: "flex", flexDirection: "column", alignItems: "center",
-    justifyContent: L.texto.pos === "cima" ? "flex-start" : "flex-end",
-    padding: "0 6%", textAlign: "center", pointerEvents: "none",
+    textAlign: "center", padding: "0 6%", pointerEvents: "none",
   };
 
   return (
@@ -894,21 +899,23 @@ function OverlayNegocio({ variante, cor, logo, destaque }) {
         <path d={L.onda} fill={cor} />
       </svg>
 
-      {/* cartão claro com o logo do cliente (ou "LOGO" de exemplo) */}
-      <div style={{ ...posCartao, borderRadius: "2.8cqi", background: "#EFE6D9",
-                    boxShadow: "0 4px 14px rgba(0,0,0,.18)", padding: "6%",
+      {/* cartão claro com o logo do cliente (ou "LOGO" de exemplo).
+          rx=30/1080=2,78cqi. */}
+      <div style={{ ...posCartao, borderRadius: "2.78cqi", background: "#EFE6D9",
+                    boxShadow: "0 4px 14px rgba(0,0,0,.18)", padding: "2cqi",
                     display: "flex", alignItems: "center", justifyContent: "center", overflow: "hidden" }}>
         {logo
           ? <img src={logo} alt="logo" style={{ width: "100%", height: "100%", objectFit: "contain" }} />
-          : <span style={{ color: "#9a9086", fontWeight: 700, fontSize: "3.2cqi", letterSpacing: "0.15em" }}>LOGO</span>}
+          : <span style={{ color: "#9a9086", fontWeight: 700, fontSize: "3.15cqi", letterSpacing: "0.15em" }}>LOGO</span>}
       </div>
 
-      {/* texto grande na faixa reservada, com a sombra difusa do desenho */}
+      {/* texto grande na faixa reservada, com a sombra difusa do desenho.
+          font-size 88/1080=8,15cqi; entrelinha 98/88=1,11; letter-spacing -1. */}
       <div style={boxTexto}>
         {linhas.map((linha, k) => (
           <div key={k} style={{
-                color: "#fff", fontWeight: 900, fontSize: "8.1cqi", lineHeight: 1.05,
-                letterSpacing: "-0.02em",
+                color: "#fff", fontWeight: 900, fontSize: "8.15cqi", lineHeight: 1.11,
+                letterSpacing: "-0.09cqi",
                 textShadow: "0 0.5cqi 1.2cqi rgba(0,0,0,.62), 0 0.2cqi 0.5cqi rgba(0,0,0,.5)",
                 fontFamily: "'Arial Black','Helvetica Neue',system-ui,sans-serif" }}>
             {linha}

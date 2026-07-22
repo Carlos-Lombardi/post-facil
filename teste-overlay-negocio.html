@@ -62,20 +62,21 @@
 
   .overlay-svg{position:absolute;inset:0;width:100%;height:100%;pointer-events:none;display:block}
 
-  /* Cartão claro do logo — quadrado, lado em cqi (= % da largura), posição fixa. */
+  /* Cartão claro do logo — quadrado de 222/1080=20,56cqi, rx=30/1080=2,78cqi.
+     box-sizing border-box (o padding NÃO soma à largura); padding em cqi. */
   .cardlogo{
-    position:absolute;width:20.56cqi;height:20.56cqi;border-radius:2.8cqi;
-    background:#EFE6D9;box-shadow:0 4px 14px rgba(0,0,0,.18);padding:6%;
+    position:absolute;box-sizing:border-box;width:20.56cqi;height:20.56cqi;border-radius:2.78cqi;
+    background:#EFE6D9;box-shadow:0 4px 14px rgba(0,0,0,.18);padding:2cqi;
     display:flex;align-items:center;justify-content:center;overflow:hidden;
   }
   .cardlogo img{width:100%;height:100%;object-fit:contain}
-  .cardlogo span{color:#9a9086;font-weight:700;font-size:3.2cqi;letter-spacing:.15em}
+  .cardlogo span{color:#9a9086;font-weight:700;font-size:3.15cqi;letter-spacing:.15em}
 
-  /* Texto grande na faixa reservada. */
+  /* Texto grande na faixa reservada. font 88/1080=8,15cqi; entrelinha 1,11; letter-spacing -1. */
   .txtbox{position:absolute;left:0;right:0;padding:0 6%;text-align:center;pointer-events:none;
     display:flex;flex-direction:column;align-items:center}
   .txtbox .linha{
-    color:#fff;font-weight:900;font-size:8.1cqi;line-height:1.05;letter-spacing:-.02em;
+    color:#fff;font-weight:900;font-size:8.15cqi;line-height:1.11;letter-spacing:-.09cqi;
     text-shadow:0 .5cqi 1.2cqi rgba(0,0,0,.62), 0 .2cqi .5cqi rgba(0,0,0,.5);
     font-family:'Arial Black','Helvetica Neue',system-ui,sans-serif;
   }
@@ -157,14 +158,14 @@ const LAYOUTS = {
     onda: "M0,0 H1080 V14 C700,44 300,62 0,222 Z",
     grad: { y:985, h:365, stops:[[0,0],[0.55,0.38],[1,0.82]] },
     logo: { top:33/1350, left:50/1080 },
-    texto:{ pos:"baixo" },
+    texto:{ pos:"baixo", offset:2.4 },
     nome:"Variante A — onda no topo", desc:"Logo em cima à esquerda, texto embaixo."
   },
   B: {
     onda: "M0,1350 L0,1336 C380,1306 780,1288 1080,1128 L1080,1350 Z",
     grad: { y:0, h:365, stops:[[0,0.82],[0.45,0.38],[1,0]] },
     logo: { bottom:33/1350, right:50/1080 },
-    texto:{ pos:"cima" },
+    texto:{ pos:"cima", offset:5.9 },
     nome:"Variante B — onda na base", desc:"Texto em cima, logo embaixo à direita."
   },
 };
@@ -204,8 +205,8 @@ function overlayHTML(key){
   ].filter(Boolean).join(";");
 
   const anchor = L.texto.pos==="cima"
-    ? "top:2.5%;justify-content:flex-start"
-    : "bottom:2.5%;justify-content:flex-end";
+    ? `top:${L.texto.offset}%`
+    : `bottom:${L.texto.offset}%`;
 
   return `
     <svg class="overlay-svg" viewBox="0 0 1080 1350" preserveAspectRatio="none" xmlns="http://www.w3.org/2000/svg">
