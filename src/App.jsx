@@ -7,6 +7,7 @@ import { criarFicha, salvarFicha, carregarFicha, garantirClienteId } from "./fic
 import { DADOS } from "./dados.js";
 import { gerarTexto, gerarImagem } from "./api.js";
 import { analisarCorDoLogo, escurecerParaContraste } from "./cor.js";
+import { prepararLogoEnviado } from "./logo.js";
 import {
   PostFacilLogo, AppHeader, Toast, useToast, QuotaBar,
   ADMIN_PASS, DEFAULT_CODES, getDefaultLimits, getOverrides,
@@ -36,12 +37,70 @@ const MODO_REAL_NEGOCIO = true;
 const MODO_REAL_IMAGEM_NEGOCIO = true;
 
 // ============================================================
+// PAINEL DE DESENVOLVEDOR — OCULTO DO CLIENTE, SÓ LEITURA
+// Serve para ver COMO os prompts do último post de Negócio foram
+// montados (hoje só se vê o resultado final).
+//
+// Só aparece quando a URL tem ?dev=<DEV_PALAVRA>. Sem esse parâmetro
+// o painel nem entra na árvore da tela e NADA é capturado — para o
+// cliente, absolutamente nada muda.
+//
+// Troque a palavra abaixo quando quiser (é só esta linha).
+//
+// NUNCA guarde nem exiba aqui chave de API ou variável de ambiente:
+// as chaves ficam no servidor (/api/claude, /api/imagens) e não
+// passam pelo app. Só entram neste espelho os campos listados em
+// novoDebugNegocio().
+// ============================================================
+const DEV_PALAVRA = "bastidores";
+
+const DEV_ON = (() => {
+  try {
+    return new URLSearchParams(window.location.search).get("dev") === DEV_PALAVRA;
+  } catch (e) {
+    console.error("Não consegui ler o parâmetro ?dev da URL:", e);
+    return false;
+  }
+})();
+
+// Bastidores do ÚLTIMO post de Negócio gerado. É um espelho de LEITURA:
+// gerarPostNegocioReal cria o objeto e vai preenchendo os campos conforme
+// as etapas acontecem — nada aqui participa da geração. Como o painel só
+// é lido depois que a tela de resultado aparece, não precisa de estado
+// nem de re-render.
+let debugNegocio = null;
+
+// Cria (e passa a ser o "último") registro de bastidores. Só é chamado
+// quando o painel está ligado; com o painel desligado, debugNegocio
+// continua null e nem memória é gasta.
+function novoDebugNegocio() {
+  debugNegocio = {
+    promptPadrao: "",     // system — a parte igual para todos os clientes
+    promptCliente: "",    // user — os dados deste cliente
+    jsonCru: "",          // resposta crua do Claude, antes de extrairJSON
+    promptImagem: "",     // prompt final enviado ao gerador de imagem
+    corMarca: "",         // cor da marca usada no layout
+    historicoTexto: "",   // bloco anti-repetição enviado ao Claude
+    historicoCenas: [],   // cenas já usadas, enviadas à IA de imagem
+    msTexto: null,        // duração da chamada de texto
+    msImagem: null,       // duração da chamada de imagem
+    em: new Date(),
+  };
+  return debugNegocio;
+}
+
+function lerDebugNegocio() {
+  return debugNegocio;
+}
+
+// ============================================================
 // SEGUNDA CAMADA (OVERLAY) DO POST DE NEGÓCIO
 // Layout FIXO copiado de layouts-post-facil.html (viewBox 1080×1350, 4:5).
 // A imagem limpa da IA entra por baixo; esta camada gráfica entra por cima.
-// Duas variantes que o app ALTERNA a cada post:
-//   A → onda no topo, logo em cima à esquerda, texto embaixo.
-//   B → onda na base, texto em cima, logo embaixo à direita.
+// A posição é FIXA e igual em feed (4:5) e stories (9:16):
+//   • mensagem SEMPRE na faixa reservada de CIMA;
+//   • onda decorativa + logo + CTA SEMPRE no rodapé (faixa reservada de BAIXO).
+// A variação entre posts vem da CENA da imagem e da COR da marca — não da posição.
 // ============================================================
 
 // Cor da marca — UMA variável única que recolore a onda e o degradê.
@@ -58,30 +117,15 @@ function corDeLayout(profile) {
 }
 
 // Medidas exatas do desenho (mesmos números do SVG de referência).
-const LAYOUTS_NEGOCIO = {
-  A: {
-    onda: "M0,0 H1080 V14 C700,44 300,62 0,222 Z",
-    grad: { y: 985, h: 365, stops: [[0, 0], [0.55, 0.38], [1, 0.82]] },
-    logo: { top: 33 / 1350, left: 50 / 1080 },     // cartão claro em cima à esquerda
-    texto: { pos: "baixo", offset: 2.4 },           // baselines 1192/1290 → ~2,4% do fundo
-  },
-  B: {
-    onda: "M0,1350 L0,1336 C380,1306 780,1288 1080,1128 L1080,1350 Z",
-    grad: { y: 0, h: 365, stops: [[0, 0.82], [0.45, 0.38], [1, 0]] },
-    logo: { bottom: 33 / 1350, right: 50 / 1080 },  // cartão claro embaixo à direita
-    texto: { pos: "cima", offset: 5.9 },            // baselines 150/248 → ~5,9% do topo
-  },
+// Layout ÚNICO e fixo. Antes havia variantes A/B que alternavam a posição do
+// logo; agora a posição é fixa, então sobrou só esta configuração (a antiga
+// "B"): texto em cima, onda + logo + CTA no rodapé, degradê no topo.
+const NEGOCIO = {
+  onda: "M0,1350 L0,1336 C380,1306 780,1288 1080,1128 L1080,1350 Z", // onda na base
+  grad: { y: 0, h: 365, stops: [[0, 0.82], [0.45, 0.38], [1, 0]] },   // degradê no topo (legibilidade do texto)
+  logo: { bottom: 33 / 1350, right: 50 / 1080 },  // cartão claro no rodapé, à direita
+  texto: { pos: "cima", offset: 5.9 },            // baselines 150/248 → ~5,9% do topo
 };
-
-// Alterna a variante do layout a cada post gerado (persiste entre sessões).
-function proximaVarianteNegocio() {
-  let idx = 0;
-  try {
-    idx = parseInt(localStorage.getItem("pf_layout_neg") || "0", 10) || 0;
-    localStorage.setItem("pf_layout_neg", String(idx + 1));
-  } catch { /* localStorage indisponível: começa em A */ }
-  return idx % 2 === 0 ? "A" : "B";
-}
 
 // ============================================================
 // HISTÓRICO ANTI-REPETIÇÃO — POST DE NEGÓCIO
@@ -132,7 +176,7 @@ function blocoHistoricoParaTexto(hist) {
   if (!hist.length) return "";
   const linhas = hist.map((h, i) =>
     `${i + 1}. Cena: ${h.resumoCena || "-"} | Tema do texto: ${h.temaTexto || "-"}`
-    + ` | Tom: ${h.tom || "-"} | Layout: ${h.variante || "-"}, cor ${h.corDestaque || "-"}`
+    + ` | Tom: ${h.tom || "-"} | Cor: ${h.corDestaque || "-"}`
   ).join("\n");
   return [
     "",
@@ -216,7 +260,11 @@ function ModalLembreteLogo({ onContinuar, onLogoSalvo, onCriarComIA }) {
     const f = e.target.files?.[0];
     if (!f) return;
     const reader = new FileReader();
-    reader.onload = () => onLogoSalvo(reader.result);
+    // Fundo removido no envio (uma vez só); se não der, segue o original.
+    reader.onload = async () => {
+      const r = await prepararLogoEnviado(reader.result);
+      onLogoSalvo(r.url, r.semFundo);
+    };
     reader.readAsDataURL(f);
   }
 
@@ -292,7 +340,12 @@ function Dashboard({ profile, onEdit, onLogoAtualizado }) {
     const f = e.target.files?.[0];
     if (!f) return;
     const reader = new FileReader();
-    reader.onload = () => { onLogoAtualizado(reader.result); setShowLogoOpcoes(false); };
+    // Fundo removido no envio (uma vez só); se não der, segue o original.
+    reader.onload = async () => {
+      const r = await prepararLogoEnviado(reader.result);
+      onLogoAtualizado(r.url, r.semFundo);
+      setShowLogoOpcoes(false);
+    };
     reader.readAsDataURL(f);
   }
 
@@ -313,9 +366,9 @@ function Dashboard({ profile, onEdit, onLogoAtualizado }) {
     if (tipoPendente) { setFluxoAtivo(tipoPendente); setTipoPendente(null); }
   }
 
-  function logoSalvoDoModal(dataUrl) {
+  function logoSalvoDoModal(dataUrl, semFundo) {
     setShowLogoModal(false);
-    onLogoAtualizado(dataUrl);
+    onLogoAtualizado(dataUrl, semFundo);
     if (tipoPendente) { setFluxoAtivo(tipoPendente); setTipoPendente(null); }
   }
 
@@ -618,6 +671,10 @@ async function gerarPostNegocioReal(profile) {
   // chamar a nossa IA para orientá-la a criar algo diferente.
   const hist = lerHistoricoNegocio(profile);
 
+  // Espelho de leitura para o painel de desenvolvedor. Fora do modo ?dev
+  // fica null e nenhuma linha abaixo faz nada. Nada aqui altera a geração.
+  const dbg = DEV_ON ? novoDebugNegocio() : null;
+
   const system = [
     "Você é o diretor de arte do Post Fácil, um app que cria posts profissionais de Instagram para pequenos negócios brasileiros.",
     "Você PENSA A PEÇA INTEIRA DE UMA VEZ (imagem, texto da imagem e legenda nascem do mesmo raciocínio, coerentes entre si).",
@@ -625,7 +682,7 @@ async function gerarPostNegocioReal(profile) {
     "Responda SEMPRE em português do Brasil e APENAS com um JSON válido, sem texto antes ou depois, sem cercas de código. O JSON tem exatamente estas chaves:",
     '- "legenda": legenda do post para o Instagram, calorosa e profissional, coerente com o texto_imagem.',
     '- "texto_imagem": texto CURTO (poucas palavras, cabe em até 2 linhas) que será aplicado por cima da imagem.',
-    '- "descricao_fundo": descrição do cenário para a IA de imagem, SEM texto/letras/palavras na cena. O assunto principal fica CENTRALIZADO (no miolo da imagem); o topo e a base ficam calmos, com fundo neutro e desfocado. Uso interno.',
+    '- "descricao_fundo": descrição do cenário para a IA de imagem, SEM texto/letras/palavras na cena. Descreva uma FOTOGRAFIA REAL (não ilustração/desenho/3D), de preferência com pessoas reais, com astral positivo e acolhedor, e faça a cena ALUDIR ao texto_imagem (imagem e texto conversam). O assunto principal fica CENTRALIZADO (no miolo da imagem); o topo e a base ficam calmos, com fundo neutro e desfocado. Uso interno.',
     '- "cta": chamada para ação curta.',
     '- "hashtags": array de 4 a 6 hashtags do segmento (sem espaços dentro de cada uma).',
     "",
@@ -633,9 +690,14 @@ async function gerarPostNegocioReal(profile) {
     "A. A imagem recebe uma camada gráfica por cima: uma faixa colorida e um texto grande cobrem os 20% do topo e os 20% da base. Por isso a descricao_fundo DEVE manter o assunto principal inteiramente no miolo (60% centrais) e descrever o topo e a base como áreas calmas — fundo neutro, desfocado, sem elementos importantes.",
     "B. Tom profissional que impressione: use na descricao_fundo termos como iluminação profissional, composição cuidada, aparência premium, foco nítido, cores harmoniosas.",
     "C. VARIE A CENA a cada post: mude cenário, ângulo, enquadramento e composição na descricao_fundo. Evite repetir o mesmo clichê (ex.: não caia sempre em \"xícara sobre balcão de madeira\"). Mantenha sempre a fidelidade ao segmento e à identidade do negócio.",
+    "D. ESTILO REALISTA POR PADRÃO: a descricao_fundo descreve uma FOTO REAL, com pessoas reais quando fizer sentido, nunca ilustração/desenho/3D. EXCEÇÃO guiada pelo tema: assuntos infantis ou lúdicos/festivos/fantasiosos (festa de criança, brinquedos, produtos de bebê, doces infantis) PODEM pedir ilustração/desenho quando combinar melhor com o post — é exceção, não regra geral.",
     "",
     "REGRAS: NUNCA invente produtos/serviços que o cliente não informou. A descricao_fundo é interna e nunca é mostrada ao cliente. Ao se referir à IA nos textos ao cliente, diga \"nossa IA\".",
   ].join("\n");
+
+  // Bloco do histórico anti-repetição que entra no prompt (vazio no 1º post).
+  // Extraído para uma constante só para o painel poder mostrá-lo à parte.
+  const blocoHist = blocoHistoricoParaTexto(hist);
 
   const user = [
     "Gere UM post de Instagram para este negócio.",
@@ -648,14 +710,26 @@ async function gerarPostNegocioReal(profile) {
     "",
     "Respostas do onboarding do cliente:",
     qa || "(sem respostas registradas)",
-    blocoHistoricoParaTexto(hist),
+    blocoHist,
     "",
     "Lembre-se: mantenha o assunto centralizado no miolo, deixe o topo e a base calmos, e varie a cena a cada post. Responda só com o JSON.",
   ]
     .filter(Boolean)
     .join("\n");
 
+  if (dbg) {
+    dbg.promptPadrao = system;
+    dbg.promptCliente = user;
+    dbg.historicoTexto = blocoHist;
+    dbg.corMarca = corDeLayout(profile);
+  }
+
+  const t0Texto = performance.now();
   const texto = await gerarTexto(system, user, 1200);
+  if (dbg) {
+    dbg.msTexto = Math.round(performance.now() - t0Texto);
+    dbg.jsonCru = texto;   // cru, exatamente como veio (antes de extrairJSON)
+  }
   const j = extrairJSON(texto);
 
   // Passo 3 da referência: a IA de imagem gera a imagem LIMPA (sem texto),
@@ -664,11 +738,17 @@ async function gerarPostNegocioReal(profile) {
   // NÃO derruba o post: sem imagem, cai no placeholder demo (gradiente).
   // Passa as cenas já usadas por este cliente para a IA de imagem evitá-las.
   const historicoCenas = hist.map((h) => h.resumoCena).filter(Boolean);
-  const { imagem, resumoCena } = await gerarImagemLimpaNegocio(j, historicoCenas);
+  const { imagem, resumoCena, promptImagem, msImagem } =
+    await gerarImagemLimpaNegocio(j, historicoCenas);
 
-  // A variante do layout alterna a cada post (A/B). A posição do texto e do
-  // logo é FIXA pelo desenho — não vem mais da IA.
-  const variante = proximaVarianteNegocio();
+  if (dbg) {
+    dbg.promptImagem = promptImagem;
+    dbg.msImagem = msImagem;
+    dbg.historicoCenas = historicoCenas;
+  }
+
+  // A posição do texto e do logo é FIXA pelo desenho — não vem da IA e não
+  // alterna mais entre posts.
 
   // Registra este post no histórico anti-repetição (só texto, nunca a imagem)
   // para orientar as próximas gerações deste cliente.
@@ -676,7 +756,6 @@ async function gerarPostNegocioReal(profile) {
     resumoCena,
     temaTexto: [(j.texto_imagem || "").trim(), (j.cta || "").trim()].filter(Boolean).join(" · "),
     tom: tons,
-    variante,
     corDestaque: corDeLayout(profile),
   });
 
@@ -687,7 +766,7 @@ async function gerarPostNegocioReal(profile) {
     hashtags: normalizarHashtags(j.hashtags),
     destaque: (j.texto_imagem || "").trim(),
     sub: (j.cta || "").trim(),
-    variante,
+    overlay: "negocio",
     imagem,
   };
 }
@@ -695,9 +774,11 @@ async function gerarPostNegocioReal(profile) {
 // Gera a imagem de fundo LIMPA (sem texto) a partir da descricao_fundo.
 // A composição é FIXA: o assunto fica no miolo (60% centrais) e as faixas de
 // topo e base ficam calmas, porque uma camada gráfica (faixa colorida + logo +
-// texto grande) será aplicada por cima delas. Retorna { imagem, resumoCena }:
-// imagem é null se falhar ou se a IA de imagem estiver desligada (a tela usa o
-// placeholder demo), e resumoCena alimenta o histórico anti-repetição do cliente.
+// texto grande) será aplicada por cima delas. Retorna
+// { imagem, resumoCena, promptImagem, msImagem }: imagem é null se falhar ou se
+// a IA de imagem estiver desligada (a tela usa o placeholder demo), resumoCena
+// alimenta o histórico anti-repetição do cliente, e promptImagem/msImagem
+// existem só para o painel de desenvolvedor ler (quem gera o post os ignora).
 async function gerarImagemLimpaNegocio(j, historicoCenas = []) {
   const fundo = (j.descricao_fundo || "").trim();
 
@@ -728,10 +809,19 @@ async function gerarImagemLimpaNegocio(j, historicoCenas = []) {
 
   // IA de imagem desligada ou sem descrição: sem imagem, mas devolvemos o
   // resumo (ainda útil para o histórico anti-repetição do texto).
-  if (!MODO_REAL_IMAGEM_NEGOCIO || !fundo) return { imagem: null, resumoCena };
+  if (!MODO_REAL_IMAGEM_NEGOCIO || !fundo)
+    return { imagem: null, resumoCena, promptImagem: "", msImagem: null };
+
+  const temaMensagem = (j.texto_imagem || "").trim();
 
   const prompt = [
     fundo,
+    // Estilo: fotografia REAL por padrão; ilustração só como exceção guiada pelo tema.
+    "ESTILO OBRIGATÓRIO: fotografia REAL (foto de verdade), de preferência com pessoas reais, com astral positivo e acolhedor. NÃO use ilustração, desenho, arte digital, 3D ou render. EXCEÇÃO: quando o tema for infantil ou lúdico/festivo/fantasioso (festa de criança, brinquedos, produtos de bebê, doces infantis), a imagem PODE ser ilustração ou desenho se combinar melhor com o universo do post — é uma exceção guiada pelo tema, não uma liberação geral; fora desses casos, mantenha a foto realista.",
+    // A cena deve conversar com a mensagem que entra por cima (imagem e texto aludem-se).
+    temaMensagem
+      ? `A cena deve ALUDIR à mensagem que será aplicada por cima: "${temaMensagem}". Imagem e texto conversam — sem escrever esse texto nem qualquer palavra na cena.`
+      : "",
     `Variação obrigatória desta geração: ${angulo}; ${enquadramento}; ${composicao}; ${luz}.`,
     "Crie uma CENA DIFERENTE das anteriores — outro cenário, ângulo, enquadramento e composição — mantendo o mesmo segmento e a identidade do negócio.",
     historicoCenas.length
@@ -751,12 +841,15 @@ async function gerarImagemLimpaNegocio(j, historicoCenas = []) {
   // Post é retrato tanto no feed (4:5) quanto no stories (9:16).
   const size = "1024x1536";
 
+  const t0 = performance.now();
   try {
     const imagem = await gerarImagem(prompt, size);
-    return { imagem, resumoCena };
+    return { imagem, resumoCena, promptImagem: prompt, msImagem: Math.round(performance.now() - t0) };
   } catch (e) {
     console.error("Geração de imagem falhou, usando placeholder:", e);
-    return { imagem: null, resumoCena };
+    // Mesmo falhando devolvemos o prompt e o tempo: é justamente o caso em
+    // que o painel de desenvolvedor precisa mostrar o que foi enviado.
+    return { imagem: null, resumoCena, promptImagem: prompt, msImagem: Math.round(performance.now() - t0) };
   }
 }
 
@@ -954,10 +1047,11 @@ function TelaCarregamento() {
 // distorção em 4:5 nem 9:16) entram por cima, nas posições fixas do desenho.
 // As medidas em cqi acompanham a LARGURA do card (o container precisa de
 // containerType: "inline-size").
-function OverlayNegocio({ variante, cor, logo, destaque }) {
-  const L = LAYOUTS_NEGOCIO[variante] || LAYOUTS_NEGOCIO.A;
+function OverlayNegocio({ cor, logo, logoSemFundo, destaque, sub }) {
+  const L = NEGOCIO;
   const linhas = quebrarEmLinhas(destaque);
-  const gid = "pfgrad-" + variante;
+  const gid = "pfgrad-neg";
+  const cta = String(sub || "").trim();
 
   // Cartão claro do logo: quadrado de 222/1080 = 20,56% da largura (222×222 no
   // viewBox 1080×1350). box-sizing border-box para o padding NÃO somar à largura
@@ -1003,7 +1097,14 @@ function OverlayNegocio({ variante, cor, logo, destaque }) {
                     boxShadow: "0 4px 14px rgba(0,0,0,.18)", padding: "2cqi",
                     display: "flex", alignItems: "center", justifyContent: "center", overflow: "hidden" }}>
         {logo
-          ? <img src={logo} alt="logo" style={{ width: "100%", height: "100%", objectFit: "contain" }} />
+          ? <img src={logo} alt="logo" style={{
+              width: "100%", height: "100%", objectFit: "contain",
+              // Sombra esfumaçada só no logo SEM fundo: drop-shadow segue o
+              // canal alfa e contorna o desenho do logo. Num logo que ainda
+              // tem o quadrado de fundo ela contornaria o quadrado, então
+              // nesse caso não entra.
+              filter: logoSemFundo ? "drop-shadow(0 0.25cqi 0.5cqi rgba(0,0,0,.38))" : "none",
+            }} />
           : <span style={{ color: "#9a9086", fontWeight: 700, fontSize: "3.15cqi", letterSpacing: "0.15em" }}>LOGO</span>}
       </div>
 
@@ -1020,7 +1121,157 @@ function OverlayNegocio({ variante, cor, logo, destaque }) {
           </div>
         ))}
       </div>
+
+      {/* CTA curto no rodapé, à ESQUERDA do cartão do logo. Fica ACIMA da onda
+          (nunca por cima dela) e CENTRADO no vão livre que vai da margem
+          esquerda até a lateral do cartão do logo. A caixa é a faixa desse vão;
+          a pílula translúcida (que garante leitura sobre qualquer imagem) é
+          centralizada dentro dela. Só aparece quando há CTA. */}
+      {cta && (
+        <div style={{
+          position: "absolute",
+          // A onda sobe da esquerda (y≈1336) para a direita (y≈1250 no fim do
+          // vão). Base em 1200/1350 deixa ~50px de respiro entre a pílula e a onda.
+          bottom: (150 / 1350) * 100 + "%",
+          left: (50 / 1080) * 100 + "%",    // mesma margem lateral do cartão do logo
+          right: (316 / 1080) * 100 + "%",  // para na lateral do cartão, com folga (~44px)
+          display: "flex", justifyContent: "center",
+          pointerEvents: "none",
+        }}>
+          <div style={{
+            maxWidth: "100%",
+            padding: "1.7cqi 2.8cqi", borderRadius: "3cqi",
+            background: "rgba(0,0,0,.42)", boxShadow: "0 0.4cqi 1cqi rgba(0,0,0,.35)",
+            color: "#fff", fontWeight: 800, fontSize: "3.4cqi", lineHeight: 1.15,
+            textAlign: "center",
+          }}>
+            {cta}
+          </div>
+        </div>
+      )}
     </>
+  );
+}
+
+// ============================================================
+// PAINEL DE DESENVOLVEDOR (só leitura) — ver ?dev= no topo do arquivo.
+// Mostra como os prompts do último post de Negócio foram montados.
+// Renderiza SOMENTE os campos de debugNegocio, um a um, escolhidos à mão:
+// nunca o profile inteiro, nunca import.meta.env, nunca chave de API.
+// Não tem nenhum campo de edição — é leitura e cópia.
+// ============================================================
+
+// Formata uma duração para leitura ("3,2 s (3218 ms)").
+function formatarMs(ms) {
+  if (ms == null) return "—";
+  return (ms / 1000).toFixed(1).replace(".", ",") + " s (" + ms + " ms)";
+}
+
+// Junta as duas camadas do prompt do Claude, identificadas, para dar
+// o "prompt completo" numa cópia só.
+function montarPromptCompleto(d) {
+  return [
+    "===== CAMADA 1 · SYSTEM (padrão, igual para todos os clientes) =====",
+    d.promptPadrao || "(vazio)",
+    "",
+    "===== CAMADA 2 · USER (dados deste cliente) =====",
+    d.promptCliente || "(vazio)",
+  ].join("\n");
+}
+
+// Um bloco recolhível com o conteúdo em monoespaçado e botão de copiar.
+function BlocoDev({ titulo, conteudo, onCopiar }) {
+  const [aberto, setAberto] = useState(false);
+  const texto = conteudo || "(vazio)";
+  return (
+    <div style={{ border: "1px solid #2c3a4d", borderRadius: 10, marginBottom: 8, overflow: "hidden", background: "#0f172a" }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "10px 12px" }}>
+        <span onClick={() => setAberto(!aberto)} style={{ flex: 1, cursor: "pointer", color: "#cbd5e1", fontWeight: 800, fontSize: 12, lineHeight: 1.3 }}>
+          {aberto ? "▾" : "▸"} {titulo}
+        </span>
+        <button
+          onClick={() => onCopiar(texto)}
+          style={{ border: "1px solid #3b4a5f", background: "#1e293b", color: "#93c5fd", borderRadius: 8, padding: "5px 10px", fontSize: 11, fontWeight: 800, cursor: "pointer", fontFamily: GEN_FONT, flexShrink: 0 }}
+        >
+          📋 Copiar
+        </button>
+      </div>
+      {aberto && (
+        <pre style={{ margin: 0, padding: "10px 12px", borderTop: "1px solid #2c3a4d", color: "#e2e8f0", fontSize: 11, lineHeight: 1.5, whiteSpace: "pre-wrap", wordBreak: "break-word", maxHeight: 320, overflowY: "auto", fontFamily: "ui-monospace,Menlo,Consolas,monospace" }}>
+          {texto}
+        </pre>
+      )}
+    </div>
+  );
+}
+
+function PainelDev() {
+  const [aberto, setAberto] = useState(false); // recolhido por padrão
+  const [toast, showToast] = useToast();
+  const d = lerDebugNegocio();
+
+  const copiar = (texto) =>
+    doCopy(texto, () => showToast("📋 Copiado!"), () => showToast("Não consegui copiar 😕"));
+
+  const caixa = { margin: "40px 20px 0", background: "#0b1220", border: "1px solid #1e293b", borderRadius: 14, padding: 12 };
+  const cabecalho = { display: "flex", alignItems: "center", gap: 8, cursor: "pointer", color: "#93c5fd", fontWeight: 900, fontSize: 13 };
+
+  if (!d) {
+    return (
+      <div style={caixa}>
+        <div style={{ ...cabecalho, cursor: "default" }}>🛠️ Painel do desenvolvedor</div>
+        <div style={{ color: "#64748b", fontSize: 12, marginTop: 8, lineHeight: 1.5 }}>
+          Nenhum post de Negócio gerado nesta sessão ainda. Gere um post de Negócio
+          para ver aqui como os prompts foram montados.
+        </div>
+        {toast && <Toast msg={toast} />}
+      </div>
+    );
+  }
+
+  const totalMs = (d.msTexto || 0) + (d.msImagem || 0);
+  const tempos = [
+    "Texto (Claude): " + formatarMs(d.msTexto),
+    "Imagem: " + formatarMs(d.msImagem),
+    "Total das chamadas: " + formatarMs(totalMs || null),
+  ].join("\n");
+
+  const corEHistorico = [
+    "Cor da marca usada no layout: " + (d.corMarca || "—"),
+    "",
+    "Bloco do histórico anti-repetição enviado ao Claude:",
+    d.historicoTexto || "(nenhum — primeiro post deste cliente)",
+    "",
+    "Cenas já usadas, enviadas à IA de imagem:",
+    d.historicoCenas.length
+      ? d.historicoCenas.map((c, i) => `(${i + 1}) ${c}`).join("\n")
+      : "(nenhuma)",
+  ].join("\n");
+
+  return (
+    <div style={caixa}>
+      <div onClick={() => setAberto(!aberto)} style={cabecalho}>
+        <span>{aberto ? "▾" : "▸"}</span>
+        <span style={{ flex: 1 }}>🛠️ Painel do desenvolvedor — último post de Negócio</span>
+        <span style={{ color: "#64748b", fontWeight: 700, fontSize: 11 }}>só leitura</span>
+      </div>
+
+      {aberto && (
+        <div style={{ marginTop: 12 }}>
+          <BlocoDev titulo="1 · Prompt padrão (system) — igual para todos os clientes" conteudo={d.promptPadrao} onCopiar={copiar} />
+          <BlocoDev titulo="2 · Dados deste cliente (user) — a camada que varia" conteudo={d.promptCliente} onCopiar={copiar} />
+          <BlocoDev titulo="3 · Prompt completo enviado ao Claude (as duas camadas)" conteudo={montarPromptCompleto(d)} onCopiar={copiar} />
+          <BlocoDev titulo="4 · JSON cru devolvido pelo Claude" conteudo={d.jsonCru} onCopiar={copiar} />
+          <BlocoDev titulo="5 · Prompt final enviado ao gerador de imagem" conteudo={d.promptImagem} onCopiar={copiar} />
+          <BlocoDev titulo="6 · Cor da marca e histórico anti-repetição" conteudo={corEHistorico} onCopiar={copiar} />
+          <BlocoDev titulo="7 · Tempo de cada chamada" conteudo={tempos} onCopiar={copiar} />
+          <div style={{ color: "#475569", fontSize: 10, lineHeight: 1.5, marginTop: 4 }}>
+            Visível só com ?dev na URL. Nenhuma chave de API passa pelo app — elas ficam no servidor.
+          </div>
+        </div>
+      )}
+      {toast && <Toast msg={toast} />}
+    </div>
   );
 }
 
@@ -1038,7 +1289,7 @@ function TelaResultado({ tipo, profile, campos, formato, resultado, onNovaVersao
   // Post de Negócio real → camada gráfica de LAYOUT FIXO (OverlayNegocio),
   // que alterna entre as variantes A/B. Demais posts (demo) mantêm o texto
   // centralizado/no canto como antes.
-  const usarOverlay = !!r.variante;
+  const usarOverlay = r.overlay === "negocio";
   const zt = r.zonaTexto;
   const temFundo = !!(midia || r.imagem);
   const textoBox = zt
@@ -1088,7 +1339,7 @@ function TelaResultado({ tipo, profile, campos, formato, resultado, onNovaVersao
               ? <video src={midia.url} style={{ position: "absolute", inset: 0, width: "100%", height: "100%", objectFit: "cover" }} muted playsInline />
               : <img src={midia.url} alt="" style={{ position: "absolute", inset: 0, width: "100%", height: "100%", objectFit: "cover" }} />)}
             {usarOverlay ? (
-              <OverlayNegocio variante={r.variante} cor={corDeLayout(profile)} logo={profile.logo} destaque={r.destaque} />
+              <OverlayNegocio cor={corDeLayout(profile)} logo={profile.logo} logoSemFundo={profile.logoSemFundo} destaque={r.destaque} sub={r.sub} />
             ) : (
               <>
                 <div style={textoBox}>
@@ -1097,7 +1348,11 @@ function TelaResultado({ tipo, profile, campos, formato, resultado, onNovaVersao
                 </div>
                 {profile.logo && (
                   <div style={{ position: "absolute", ...cantoPos, width: 46, height: 46, borderRadius: 10, background: "#fff", padding: 4, boxSizing: "border-box", boxShadow: "0 2px 8px rgba(0,0,0,.25)" }}>
-                    <img src={profile.logo} alt="logo" style={{ width: "100%", height: "100%", objectFit: "contain" }} />
+                    {/* mesma regra do overlay: sombra só no logo sem fundo */}
+                    <img src={profile.logo} alt="logo" style={{
+                      width: "100%", height: "100%", objectFit: "contain",
+                      filter: profile.logoSemFundo ? "drop-shadow(0 1px 2px rgba(0,0,0,.3))" : "none",
+                    }} />
                   </div>
                 )}
               </>
@@ -1123,6 +1378,9 @@ function TelaResultado({ tipo, profile, campos, formato, resultado, onNovaVersao
 
         {/* card do WhatsApp */}
         <CardWhatsApp profile={profile} />
+
+        {/* painel do desenvolvedor: só existe com ?dev=<palavra> na URL */}
+        {DEV_ON && <PainelDev />}
 
         {toast && <Toast msg={toast} />}
       </div>
@@ -1225,6 +1483,7 @@ function EditarPerfil({ profile, onSalvar, onVoltar }) {
   const [whatsapp, setWhatsapp] = useState(profile.whatsapp || "");
   const [tons,     setTons]     = useState(profile.tons || []);
   const [logo,     setLogo]     = useState(profile.logo || null);
+  const [logoSemFundo, setLogoSemFundo] = useState(!!profile.logoSemFundo);
   const [corMarca, setCorMarca] = useState(profile.corMarca || "");
   const [segmento, setSegmento] = useState({ id: profile.segmentoId, nome: profile.segmentoNome });
   const [respostas, setRespostas] = useState(profile.respostas || {});
@@ -1270,9 +1529,14 @@ function EditarPerfil({ profile, onSalvar, onVoltar }) {
     if (!f) return;
     const reader = new FileReader();
     reader.onload = async () => {
-      setLogo(reader.result);
+      // Fundo removido no envio (uma vez só); se não der, segue o original.
+      const r = await prepararLogoEnviado(reader.result);
+      setLogo(r.url);
+      setLogoSemFundo(r.semFundo);
       // Sugere a cor da marca detectada do novo logo (o cliente pode ajustar).
-      const cores = await analisarCorDoLogo(reader.result);
+      // Roda sobre o logo já sem fundo: o branco virou transparência e é
+      // descartado pelo filtro de alfa que cor.js já aplica.
+      const cores = await analisarCorDoLogo(r.url);
       if (cores) setCorMarca(cores.original);
     };
     reader.readAsDataURL(f);
@@ -1316,6 +1580,7 @@ function EditarPerfil({ profile, onSalvar, onVoltar }) {
       whatsapp,
       tons,
       logo,
+      logoSemFundo: logo ? logoSemFundo : false,
       criarLogoDepois: !logo,
       corMarca: corMarca || null,
       corMarcaLayout: corLayout,
@@ -1657,11 +1922,13 @@ export default function App() {
     // navegação acontece via onIrParaDashboard na TelaFim
   }
 
-  async function atualizarLogo(novoLogo) {
+  // O logo já chega com o fundo removido de quem chamou (ver logo.js);
+  // semFundo diz se a remoção deu certo, e é o que libera a sombra no post.
+  async function atualizarLogo(novoLogo, semFundo = false) {
     // Logo novo → recalcula a cor da marca a partir dele.
     const cores = novoLogo ? await analisarCorDoLogo(novoLogo) : null;
     const fichaAtualizada = {
-      ...profile, logo: novoLogo, criarLogoDepois: false,
+      ...profile, logo: novoLogo, logoSemFundo: !!novoLogo && semFundo, criarLogoDepois: false,
       ...(cores ? { corMarca: cores.original, corMarcaLayout: cores.layout } : {}),
     };
     salvarFicha(fichaAtualizada);

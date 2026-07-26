@@ -1,5 +1,6 @@
 import { useState, useMemo, useRef, useEffect } from "react";
 import { DADOS } from "./dados.js";
+import { prepararLogoEnviado } from "./logo.js";
 
 /* ============================================================
    POST FÁCIL — Fluxo de escolha de segmento + perguntas
@@ -34,14 +35,14 @@ export default function Onboarding({ onConcluir, onIrParaDashboard, onVoltar }) 
   const [segmento, setSegmento] = useState(null);
   // cadastro acumula todos os dados do cliente
   const [cadastro, setCadastro] = useState({
-    nome: "", nomePessoa: "", whatsapp: "", tons: [], logo: null, criarLogoDepois: false, respostas: {},
+    nome: "", nomePessoa: "", whatsapp: "", tons: [], logo: null, logoSemFundo: false, criarLogoDepois: false, respostas: {},
   });
 
   const ehPessoal = tipo ? !!DADOS[tipo].direto : false;
 
   function reset() {
     setTipo(null); setSegmento(null);
-    setCadastro({ nome: "", nomePessoa: "", whatsapp: "", tons: [], logo: null, criarLogoDepois: false, respostas: {} });
+    setCadastro({ nome: "", nomePessoa: "", whatsapp: "", tons: [], logo: null, logoSemFundo: false, criarLogoDepois: false, respostas: {} });
     setTela("tipo");
   }
   function escolherTipo(t) {
@@ -61,6 +62,7 @@ export default function Onboarding({ onConcluir, onIrParaDashboard, onVoltar }) 
       whatsapp: cadastro.whatsapp,
       tons: cadastro.tons,
       logo: cadastro.logo,
+      logoSemFundo: cadastro.logoSemFundo,
       criarLogoDepois: cadastro.criarLogoDepois,
       respostas: resp,
       ...extra,
@@ -501,16 +503,21 @@ function TelaTom({ tipoInfo, valores, onVoltar, onAvancar }) {
 function TelaLogo({ tipoInfo, valores, onVoltar, onAvancar }) {
   const cor = tipoInfo.cor;
   const [logo, setLogo] = useState(valores.logo || null);
+  const [semFundo, setSemFundo] = useState(!!valores.logoSemFundo);
   const [analisando, setAnalisando] = useState(false);
   const fileRef = useRef(null);
   function escolherArquivo(e) {
     const f = e.target.files?.[0];
     if (!f) return;
     const reader = new FileReader();
-    reader.onload = () => {
-      setLogo(reader.result);
+    reader.onload = async () => {
       setAnalisando(true);
-      analisarLogoComIA(reader.result).then(() => setAnalisando(false)).catch(() => setAnalisando(false));
+      // Fundo removido já aqui, no envio: o cliente vê no preview o mesmo
+      // logo que vai entrar nos posts. Se não der, volta o original.
+      const r = await prepararLogoEnviado(reader.result);
+      setLogo(r.url);
+      setSemFundo(r.semFundo);
+      analisarLogoComIA(r.url).then(() => setAnalisando(false)).catch(() => setAnalisando(false));
     };
     reader.readAsDataURL(f);
   }
@@ -537,7 +544,16 @@ function TelaLogo({ tipoInfo, valores, onVoltar, onAvancar }) {
           </div>
         ) : (
           <div style={{ textAlign: "center", animation: "fadeUp .3s ease both" }}>
-            <div style={{ width: 150, height: 150, margin: "0 auto 14px", borderRadius: 20, border: `2px solid ${C.line}`, background: "#fff", display: "grid", placeItems: "center", overflow: "hidden" }}>
+            {/* xadrez leve quando o fundo foi removido: é o que deixa o
+                cliente VER a transparência (num fundo branco, um logo com
+                fundo branco e outro sem ficariam idênticos aqui). */}
+            <div style={{
+              width: 150, height: 150, margin: "0 auto 14px", borderRadius: 20,
+              border: `2px solid ${C.line}`, display: "grid", placeItems: "center", overflow: "hidden",
+              background: semFundo
+                ? "conic-gradient(#eef2f6 0 25%, #fff 0 50%, #eef2f6 0 75%, #fff 0) 0 0/16px 16px"
+                : "#fff",
+            }}>
               <img src={logo} alt="logo" style={{ maxWidth: "100%", maxHeight: "100%", objectFit: "contain" }} />
             </div>
             {analisando ? (
@@ -550,7 +566,7 @@ function TelaLogo({ tipoInfo, valores, onVoltar, onAvancar }) {
         <input ref={fileRef} type="file" accept="image/*" onChange={escolherArquivo} style={{ display: "none" }} />
       </div>
       {logo && (
-        <BotaoPrincipal cor={cor} desabilitado={analisando} onClick={() => onAvancar({ logo, criarLogoDepois: false })}>
+        <BotaoPrincipal cor={cor} desabilitado={analisando} onClick={() => onAvancar({ logo, logoSemFundo: semFundo, criarLogoDepois: false })}>
           Continuar →
         </BotaoPrincipal>
       )}

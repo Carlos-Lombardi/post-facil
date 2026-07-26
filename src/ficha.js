@@ -45,6 +45,10 @@ export function criarFicha(dados) {
     respostas: dados.respostas && typeof dados.respostas === "object" ? dados.respostas : {},
     // marca
     logo: dados.logo || null,
+    // true quando o fundo do logo foi removido com sucesso no envio (ver
+    // logo.js). Só o logo transparente ganha sombra no post — sombra num
+    // logo que ainda tem fundo contornaria o quadrado e ficaria pior.
+    logoSemFundo: !!dados.logoSemFundo,
     criarLogoDepois: !!dados.criarLogoDepois,
     analiseLogo: dados.analiseLogo || { coresPrincipais: [], estilo: "", observacoes: "" },
     // cor da marca extraída do logo (original do cliente) e a versão ajustada
@@ -68,7 +72,12 @@ export function salvarFicha(ficha) {
   const f = { ...ficha, atualizadoEm: new Date().toISOString() };
   try {
     localStorage.setItem(CHAVE_PERFIL, JSON.stringify(f));
-  } catch {}
+  } catch (e) {
+    // Nunca em silêncio: o logo é guardado como data URL dentro da ficha,
+    // então um estouro de cota do localStorage perderia o cadastro inteiro
+    // sem deixar rastro.
+    console.error("Falha ao salvar a ficha do cliente:", e);
+  }
   return f;
 }
 
