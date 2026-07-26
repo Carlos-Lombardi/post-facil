@@ -3,3 +3,7 @@ dist
 .vercel
 .env
 .env.local
+
+# pacotes e pastas extraidas (copias do proprio projeto, nao versionar)
+*.zip
+PostFacil_ClaudeCode/
