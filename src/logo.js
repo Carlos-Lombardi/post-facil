@@ -43,11 +43,15 @@ const DISPERSAO_MAX = 26;
 const REMOCAO_MIN = 0.02; // abaixo disso não fez nada de útil
 const REMOCAO_MAX = 0.92; // acima disso apagaria o próprio logo
 
-// Recorte no conteúdo: a caixa precisa render alguma coisa e fazer sentido.
-const RECORTE_SEM_GANHO = 0.98; // caixa deste tamanho já é a imagem inteira
+// Recorte no conteúdo. Os limiares abaixo separam DESENHO de sobra: alfa
+// fraco (sombra suave, borda clara, ruído) e linha com meia dúzia de pixels
+// não contam — senão a caixa cobre a imagem inteira e nada é recortado.
+const ALFA_MIN = 25;            // alfa abaixo disso é resto, não desenho
+const LINHA_MIN = 0.01;         // linha/coluna só conta com 1% dela preenchido
+const RECORTE_AREA_MAX = 0.95;  // caixa maior que isso: não há sobra real
 const RECORTE_AREA_MIN = 0.05;  // caixa menor que isso = detecção suspeita
-const RESPIRO = 0.04;           // margem de respiro: 4% do maior lado do desenho
-const RESPIRO_MIN = 4;          // ...nunca menos que 4px
+const RESPIRO = 0.02;           // margem de segurança: 2% do maior lado da caixa
+const RESPIRO_MIN = 2;          // ...nunca menos que 2px
 
 // Distância euclidiana entre duas cores RGB.
 function distancia(r1, g1, b1, r2, g2, b2) {
@@ -104,7 +108,8 @@ function analisarBorda(data, w, h) {
 //   "cor"  — fundo sólido preservado: é desenho o que foge da cor da borda
 function ehDesenho(criterio, data, p, borda) {
   const i = p * 4;
-  if (data[i + 3] <= 8) return false;
+  // Alfa fraco é resto (halo da suavização, sombra suave), não desenho.
+  if (data[i + 3] < ALFA_MIN) return false;
   if (criterio === "alfa") return true;
   return distancia(data[i], data[i + 1], data[i + 2], borda.r, borda.g, borda.b) > TOLERANCIA;
 }
@@ -112,8 +117,8 @@ function ehDesenho(criterio, data, p, borda) {
 // Caixa do conteúdo (bounding box) do desenho. Contamos os pixels de desenho
 // POR LINHA e POR COLUNA em vez de pegar o min/max cru: um único pixel de
 // ruído (JPEG, sujeira num canto) esticaria a caixa até a imagem inteira e o
-// recorte não faria nada. Uma linha só entra na caixa se tiver um punhado de
-// pixels de desenho. Devolve null quando não há conteúdo suficiente.
+// recorte não faria nada. Uma linha só entra na caixa se 1% dela for desenho.
+// Devolve null quando não há conteúdo suficiente.
 function caixaDoConteudo(data, w, h, criterio, borda) {
   const porLinha = new Uint32Array(h);
   const porColuna = new Uint32Array(w);
@@ -125,8 +130,10 @@ function caixaDoConteudo(data, w, h, criterio, borda) {
     }
   }
 
-  const minPorLinha = Math.max(2, Math.round(w * 0.003));
-  const minPorColuna = Math.max(2, Math.round(h * 0.003));
+  // Linha/coluna só entra na caixa se pelo menos 1% dela for desenho: elemento
+  // solto grudado na borda (um respingo, uma linha fina) não estica mais tudo.
+  const minPorLinha = Math.max(1, Math.ceil(w * LINHA_MIN));
+  const minPorColuna = Math.max(1, Math.ceil(h * LINHA_MIN));
   let minY = -1, maxY = -1, minX = -1, maxX = -1;
   for (let y = 0; y < h; y++) if (porLinha[y] >= minPorLinha) { if (minY < 0) minY = y; maxY = y; }
   for (let x = 0; x < w; x++) if (porColuna[x] >= minPorColuna) { if (minX < 0) minX = x; maxX = x; }
@@ -135,19 +142,26 @@ function caixaDoConteudo(data, w, h, criterio, borda) {
   return { x: minX, y: minY, w: maxX - minX + 1, h: maxY - minY + 1 };
 }
 
-// Recorta o canvas justo no desenho, com uma margem de respiro (nunca colado
-// no traço). Devolve { canvas, motivo }: canvas null quando não dá para
+// Recorta o canvas justo no desenho, com uma margem de segurança (nunca colado
+// no traço). Devolve { canvas, motivo, diag }: canvas null quando não dá para
 // localizar com segurança ou quando não há ganho — aí o chamador segue com a
 // imagem inteira, porque logo com margem é melhor que logo cortado errado.
+// diag leva as medidas para o diagnóstico no console de quem enviou o logo.
 function recortarNoConteudo(canvas, ctx, w, h, criterio, borda) {
   const { data } = ctx.getImageData(0, 0, w, h);
   const caixa = caixaDoConteudo(data, w, h, criterio, borda);
-  if (!caixa) return { canvas: null, motivo: "não encontrei o desenho dentro da imagem" };
+  const diag = { w, h, caixa, pctL: 0, pctA: 0, pctArea: 0 };
+  if (!caixa) return { canvas: null, motivo: "não encontrei o desenho dentro da imagem", diag };
 
-  if ((caixa.w * caixa.h) / (w * h) < RECORTE_AREA_MIN)
-    return { canvas: null, motivo: "o desenho detectado é pequeno demais para ser confiável" };
-  if (caixa.w >= w * RECORTE_SEM_GANHO && caixa.h >= h * RECORTE_SEM_GANHO)
-    return { canvas: null, motivo: "o logo já preenche o quadro" };
+  const area = (caixa.w * caixa.h) / (w * h);
+  diag.pctL = Math.round((caixa.w / w) * 100);
+  diag.pctA = Math.round((caixa.h / h) * 100);
+  diag.pctArea = Math.round(area * 100);
+
+  if (area < RECORTE_AREA_MIN)
+    return { canvas: null, motivo: "o desenho detectado é pequeno demais para ser confiável", diag };
+  if (area > RECORTE_AREA_MAX)
+    return { canvas: null, motivo: "o desenho já preenche o quadro (não há sobra real)", diag };
 
   const respiro = Math.max(RESPIRO_MIN, Math.round(Math.max(caixa.w, caixa.h) * RESPIRO));
   const x = Math.max(0, caixa.x - respiro);
@@ -155,12 +169,12 @@ function recortarNoConteudo(canvas, ctx, w, h, criterio, borda) {
   const lw = Math.min(w, caixa.x + caixa.w + respiro) - x;
   const lh = Math.min(h, caixa.y + caixa.h + respiro) - y;
   if (lw === w && lh === h)
-    return { canvas: null, motivo: "a margem de respiro já cobre a imagem inteira" };
+    return { canvas: null, motivo: "a margem de segurança já cobre a imagem inteira", diag };
 
   const corte = document.createElement("canvas");
   corte.width = lw; corte.height = lh;
   corte.getContext("2d").drawImage(canvas, x, y, lw, lh, 0, 0, lw, lh);
-  return { canvas: corte, motivo: "" };
+  return { canvas: corte, motivo: "", diag };
 }
 
 // Remove o fundo do logo e o enquadra no desenho. SEMPRE resolve — nunca lança:
@@ -170,8 +184,8 @@ function recortarNoConteudo(canvas, ctx, w, h, criterio, borda) {
 export async function removerFundoLogo(dataUrl) {
   // Devolve o logo exatamente como veio. Por padrão o motivo do não-recorte é
   // o mesmo da não-remoção (fundo fotográfico, por exemplo, impede os dois).
-  const manter = (motivo, motivoRecorte = motivo) =>
-    ({ url: dataUrl, semFundo: false, motivo, recortado: false, motivoRecorte });
+  const manter = (motivo, motivoRecorte = motivo, diagRecorte = null) =>
+    ({ url: dataUrl, semFundo: false, motivo, recortado: false, motivoRecorte, diagRecorte });
 
   if (!dataUrl) return manter("sem logo");
 
@@ -192,8 +206,11 @@ export async function removerFundoLogo(dataUrl) {
       // são decisões independentes.
       const motivo = "o logo já tem fundo transparente";
       const corte = recortarNoConteudo(canvas, ctx, w, h, "alfa", null);
-      if (!corte.canvas) return manter(motivo, corte.motivo);
-      return { url: corte.canvas.toDataURL("image/png"), semFundo: false, motivo, recortado: true, motivoRecorte: "" };
+      if (!corte.canvas) return manter(motivo, corte.motivo, corte.diag);
+      return {
+        url: corte.canvas.toDataURL("image/png"), semFundo: false, motivo,
+        recortado: true, motivoRecorte: "", diagRecorte: corte.diag,
+      };
     }
 
     // 2) O fundo é sólido? Se a borda varia muito, é foto/degradê — aí não dá
@@ -211,8 +228,11 @@ export async function removerFundoLogo(dataUrl) {
     // abaixo mexe numa cópia e só volta pro canvas no passo 5).
     const enquadrarComFundo = (motivo) => {
       const corte = recortarNoConteudo(canvas, ctx, w, h, "cor", borda);
-      if (!corte.canvas) return manter(motivo, corte.motivo);
-      return { url: corte.canvas.toDataURL("image/png"), semFundo: false, motivo, recortado: true, motivoRecorte: "" };
+      if (!corte.canvas) return manter(motivo, corte.motivo, corte.diag);
+      return {
+        url: corte.canvas.toDataURL("image/png"), semFundo: false, motivo,
+        recortado: true, motivoRecorte: "", diagRecorte: corte.diag,
+      };
     };
 
     // 3) Flood fill a partir de TODA a moldura, com pilha (nunca
@@ -281,7 +301,7 @@ export async function removerFundoLogo(dataUrl) {
     const final = corte.canvas || canvas;
     return {
       url: final.toDataURL("image/png"), semFundo: true, motivo: "",
-      recortado: !!corte.canvas, motivoRecorte: corte.motivo,
+      recortado: !!corte.canvas, motivoRecorte: corte.motivo, diagRecorte: corte.diag,
     };
   } catch (e) {
     console.error("Falha ao remover o fundo do logo, mantendo o original:", e);
@@ -293,11 +313,23 @@ export async function removerFundoLogo(dataUrl) {
 // o motivo quando desiste, para nunca falhar em silêncio.
 export async function prepararLogoEnviado(dataUrl) {
   const r = await removerFundoLogo(dataUrl);
+  if (!dataUrl) return r;
+
   if (!r.semFundo && r.motivo) {
     console.warn("Logo mantido com o fundo original —", r.motivo);
   }
   if (!r.recortado && r.motivoRecorte) {
     console.warn("Logo mantido sem recorte —", r.motivoRecorte);
   }
+
+  // Diagnóstico do enquadramento: o que entrou, o que foi localizado e o que
+  // foi feito. É por aqui que se entende no console por que um logo não cortou.
+  // "trabalho" é o canvas já reduzido a MAX_LADO, não o arquivo do cliente.
+  const d = r.diagRecorte;
+  const tamanho = d ? `trabalho ${d.w}×${d.h}px` : "trabalho não medido";
+  const caixa = d?.caixa ? `caixa ${d.pctL}%×${d.pctA}% (${d.pctArea}% da área)` : "caixa não localizada";
+  const acao = r.recortado ? "cortou" : `não cortou — ${r.motivoRecorte || "recorte não avaliado"}`;
+  console.info(`Logo enviado: ${tamanho} · ${caixa} · ${acao}`);
+
   return r;
 }
