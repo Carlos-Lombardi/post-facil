@@ -682,7 +682,7 @@ async function gerarPostNegocioReal(profile) {
     "Responda SEMPRE em português do Brasil e APENAS com um JSON válido, sem texto antes ou depois, sem cercas de código. O JSON tem exatamente estas chaves:",
     '- "legenda": legenda do post para o Instagram, calorosa e profissional, coerente com o texto_imagem.',
     '- "texto_imagem": texto CURTO (poucas palavras, cabe em até 2 linhas) que será aplicado por cima da imagem.',
-    '- "descricao_fundo": descrição do cenário para a IA de imagem, em UMA ÚNICA FRASE CORRIDA de NO MÁXIMO 100 PALAVRAS (não use listas, tópicos nem várias frases). A descrição deve COMEÇAR pelo enquadramento. É PROIBIDO usar as palavras "fechado", "close", "close-up" ou "plano médio fechado": use sempre "plano aberto" ou "plano médio", com a pessoa afastada da câmera e espaço vazio acima da cabeça. SEM texto/letras/palavras na cena. Descreva uma FOTOGRAFIA REAL (não ilustração/desenho/3D), de preferência com pessoas reais, com astral positivo e acolhedor, e faça a cena ALUDIR ao texto_imagem (imagem e texto conversam). O assunto principal fica CENTRALIZADO (no miolo da imagem); o topo e a base ficam calmos, com fundo neutro e desfocado. Uso interno.',
+    '- "descricao_fundo": descrição do cenário para a IA de imagem, em UMA ÚNICA FRASE CORRIDA de NO MÁXIMO 100 PALAVRAS (não use listas, tópicos nem várias frases). A descrição deve COMEÇAR pelo enquadramento. É PROIBIDO usar as palavras "fechado", "close", "close-up" ou "plano médio fechado". Em cenas COM PESSOAS, o enquadramento deve ser "plano americano" ou "plano aberto" (nunca "plano médio", que é da cintura para cima e deixa a cabeça alta demais), com a pessoa afastada da câmera e espaço vazio acima da cabeça; "plano médio" só é permitido em cenas SEM PESSOAS. SEM texto/letras/palavras na cena. Descreva uma FOTOGRAFIA REAL (não ilustração/desenho/3D), de preferência com pessoas reais, com astral positivo e acolhedor, e faça a cena ALUDIR ao texto_imagem (imagem e texto conversam). Em cenas SEM PESSOAS, o assunto principal fica CENTRALIZADO (no miolo da imagem). Em cenas COM PESSOAS, é PROIBIDO escrever que o produto, o objeto ou as mãos ficam "centralizados", "no meio" ou "no centro da imagem": quem ocupa a faixa central é o ROSTO, e o produto aparece logo ABAIXO do rosto, na altura do peito ou do balcão — a frase precisa dizer isso de forma explícita. O topo e a base ficam calmos, com fundo neutro e desfocado. Uso interno.',
     '- "cta": chamada para ação curta.',
     '- "hashtags": array de 4 a 6 hashtags do segmento (sem espaços dentro de cada uma).',
     "",
@@ -785,15 +785,13 @@ async function gerarImagemLimpaNegocio(j) {
   const fundo = (j.descricao_fundo || "").trim();
 
   // A IA de imagem é "sem memória" e converge para a mesma cena a cada chamada.
-  // Sorteamos ângulo, enquadramento, composição e luz para forçar variação
-  // real entre gerações, mantendo o segmento e a identidade do negócio.
+  // Sorteamos ângulo, composição e luz para forçar variação real entre gerações,
+  // mantendo o segmento e a identidade do negócio. O ENQUADRAMENTO não é sorteado:
+  // ele é decidido só pela descricao_fundo (que sabe se há pessoas na cena) — dois
+  // donos para a mesma decisão faziam o sorteio contradizer a regra de composição.
   const angulo = escolherAleatorio([
     "ângulo baixo (contra-plongée)", "vista de cima (flat lay)", "à altura dos olhos",
     "vista em três quartos", "plano aberto do ambiente",
-  ]);
-  const enquadramento = escolherAleatorio([
-    "plano aberto", "plano médio", "plano geral", "plano americano",
-    "plano aberto mostrando o entorno", "composição com bastante espaço negativo",
   ]);
   const composicao = escolherAleatorio([
     "regra dos terços", "composição centralizada e simétrica",
@@ -806,7 +804,7 @@ async function gerarImagemLimpaNegocio(j) {
 
   // Resumo curto da cena desta geração (só texto) — alimenta o histórico.
   const resumoCena = fundo
-    ? `${fundo} — ${angulo}, ${enquadramento}, ${composicao}, ${luz}`
+    ? `${fundo} — ${angulo}, ${composicao}, ${luz}`
     : "";
 
   // IA de imagem desligada ou sem descrição: sem imagem, mas devolvemos o
@@ -828,7 +826,7 @@ async function gerarImagemLimpaNegocio(j) {
     temaMensagem
       ? `A cena deve ALUDIR à mensagem que será aplicada por cima: "${temaMensagem}". Imagem e texto conversam — sem escrever esse texto nem qualquer palavra na cena.`
       : "",
-    `Variação obrigatória desta geração: ${angulo}; ${enquadramento}; ${composicao}; ${luz}.`,
+    `Variação obrigatória desta geração: ${angulo}; ${composicao}; ${luz}.`,
     "Crie uma CENA DIFERENTE das anteriores — outro cenário, ângulo, enquadramento e composição — mantendo o mesmo segmento e a identidade do negócio.",
     "A imagem continua limpa: SEM TEXTO, SEM LETRAS, SEM PALAVRAS, sem números e sem logotipos.",
     "Qualidade profissional: iluminação cuidada, composição harmoniosa, aparência premium, foco nítido.",
