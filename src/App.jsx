@@ -81,7 +81,7 @@ function novoDebugNegocio() {
     promptImagem: "",     // prompt final enviado ao gerador de imagem
     corMarca: "",         // cor da marca usada no layout
     historicoTexto: "",   // bloco anti-repetição enviado ao Claude
-    historicoCenas: [],   // cenas já usadas, enviadas à IA de imagem
+    historicoCenas: [],   // cenas já usadas (só leitura; não vão à IA de imagem)
     msTexto: null,        // duração da chamada de texto
     msImagem: null,       // duração da chamada de imagem
     em: new Date(),
@@ -682,7 +682,7 @@ async function gerarPostNegocioReal(profile) {
     "Responda SEMPRE em português do Brasil e APENAS com um JSON válido, sem texto antes ou depois, sem cercas de código. O JSON tem exatamente estas chaves:",
     '- "legenda": legenda do post para o Instagram, calorosa e profissional, coerente com o texto_imagem.',
     '- "texto_imagem": texto CURTO (poucas palavras, cabe em até 2 linhas) que será aplicado por cima da imagem.',
-    '- "descricao_fundo": descrição do cenário para a IA de imagem, em UMA ÚNICA FRASE CORRIDA de NO MÁXIMO 100 PALAVRAS (não use listas, tópicos nem várias frases). SEM texto/letras/palavras na cena. Descreva uma FOTOGRAFIA REAL (não ilustração/desenho/3D), de preferência com pessoas reais, com astral positivo e acolhedor, e faça a cena ALUDIR ao texto_imagem (imagem e texto conversam). O assunto principal fica CENTRALIZADO (no miolo da imagem); o topo e a base ficam calmos, com fundo neutro e desfocado. Uso interno.',
+    '- "descricao_fundo": descrição do cenário para a IA de imagem, em UMA ÚNICA FRASE CORRIDA de NO MÁXIMO 100 PALAVRAS (não use listas, tópicos nem várias frases). A descrição deve COMEÇAR pelo enquadramento. É PROIBIDO usar as palavras "fechado", "close", "close-up" ou "plano médio fechado": use sempre "plano aberto" ou "plano médio", com a pessoa afastada da câmera e espaço vazio acima da cabeça. SEM texto/letras/palavras na cena. Descreva uma FOTOGRAFIA REAL (não ilustração/desenho/3D), de preferência com pessoas reais, com astral positivo e acolhedor, e faça a cena ALUDIR ao texto_imagem (imagem e texto conversam). O assunto principal fica CENTRALIZADO (no miolo da imagem); o topo e a base ficam calmos, com fundo neutro e desfocado. Uso interno.',
     '- "cta": chamada para ação curta.',
     '- "hashtags": array de 4 a 6 hashtags do segmento (sem espaços dentro de cada uma).',
     "",
@@ -736,10 +736,12 @@ async function gerarPostNegocioReal(profile) {
   // recebendo só a descricao_fundo. A camada gráfica (onda, logo e texto) é
   // aplicada por cima pelo overlay de layout fixo (TelaResultado). Falha aqui
   // NÃO derruba o post: sem imagem, cai no placeholder demo (gradiente).
-  // Passa as cenas já usadas por este cliente para a IA de imagem evitá-las.
+  // As cenas já usadas NÃO vão à IA de imagem (gerador não entende negação:
+  // descrever a cena indesejada faz ele reproduzi-la). A anti-repetição é
+  // feita no Claude; aqui a lista serve só para o painel de desenvolvedor.
   const historicoCenas = hist.map((h) => h.resumoCena).filter(Boolean);
   const { imagem, resumoCena, promptImagem, msImagem } =
-    await gerarImagemLimpaNegocio(j, historicoCenas);
+    await gerarImagemLimpaNegocio(j);
 
   if (dbg) {
     dbg.promptImagem = promptImagem;
@@ -779,7 +781,7 @@ async function gerarPostNegocioReal(profile) {
 // a IA de imagem estiver desligada (a tela usa o placeholder demo), resumoCena
 // alimenta o histórico anti-repetição do cliente, e promptImagem/msImagem
 // existem só para o painel de desenvolvedor ler (quem gera o post os ignora).
-async function gerarImagemLimpaNegocio(j, historicoCenas = []) {
+async function gerarImagemLimpaNegocio(j) {
   const fundo = (j.descricao_fundo || "").trim();
 
   // A IA de imagem é "sem memória" e converge para a mesma cena a cada chamada.
@@ -787,11 +789,11 @@ async function gerarImagemLimpaNegocio(j, historicoCenas = []) {
   // real entre gerações, mantendo o segmento e a identidade do negócio.
   const angulo = escolherAleatorio([
     "ângulo baixo (contra-plongée)", "vista de cima (flat lay)", "à altura dos olhos",
-    "vista em três quartos", "close-up de detalhe", "plano aberto do ambiente",
+    "vista em três quartos", "plano aberto do ambiente",
   ]);
   const enquadramento = escolherAleatorio([
-    "enquadramento fechado no detalhe", "plano médio", "plano aberto mostrando o entorno",
-    "composição com bastante espaço negativo",
+    "plano aberto", "plano médio", "plano geral", "plano americano",
+    "plano aberto mostrando o entorno", "composição com bastante espaço negativo",
   ]);
   const composicao = escolherAleatorio([
     "regra dos terços", "composição centralizada e simétrica",
@@ -815,6 +817,10 @@ async function gerarImagemLimpaNegocio(j, historicoCenas = []) {
   const temaMensagem = (j.texto_imagem || "").trim();
 
   const prompt = [
+    // Regra de composição em PRIMEIRO lugar, antes da cena: o gerador segue
+    // melhor o que lê primeiro. Explica o MOTIVO (a camada gráfica que entra
+    // por cima) e usa linguagem de fotografia em vez de porcentagens.
+    "COMPOSIÇÃO (regra mais importante, vale acima de qualquer outra parte desta descrição): enquadre em PLANO ABERTO ou PLANO MÉDIO, NUNCA em close-up. Câmera afastada, com espaço vazio generoso acima da cabeça: se houver pessoas, o topo da cabeça começa por volta de um terço da altura da imagem, e o rosto inteiro — do topo da cabeça ao queixo — fica no miolo, folgado. O terço de cima e a faixa de baixo da imagem mostram APENAS ambiente: teto, parede, céu, prateleira desfocada, balcão, chão, fundo neutro e desfocado — sem rostos, sem cabeças, sem o produto principal, sem detalhe fino nem contraste forte. MOTIVO: sobre a faixa de cima será aplicada uma faixa escura com a frase do post, e sobre a faixa de baixo o logo da marca e a chamada para ação; qualquer rosto ou elemento importante nessas áreas será coberto e o post fica perdido. A imagem é limpa: SEM TEXTO, SEM LETRAS, SEM PALAVRAS, sem números e sem logotipos.",
     fundo,
     // Estilo: fotografia REAL por padrão; ilustração só como exceção guiada pelo tema.
     "ESTILO OBRIGATÓRIO: fotografia REAL (foto de verdade), de preferência com pessoas reais, com astral positivo e acolhedor. NÃO use ilustração, desenho, arte digital, 3D ou render. EXCEÇÃO: quando o tema for infantil ou lúdico/festivo/fantasioso (festa de criança, brinquedos, produtos de bebê, doces infantis), a imagem PODE ser ilustração ou desenho se combinar melhor com o universo do post — é uma exceção guiada pelo tema, não uma liberação geral; fora desses casos, mantenha a foto realista.",
@@ -824,17 +830,6 @@ async function gerarImagemLimpaNegocio(j, historicoCenas = []) {
       : "",
     `Variação obrigatória desta geração: ${angulo}; ${enquadramento}; ${composicao}; ${luz}.`,
     "Crie uma CENA DIFERENTE das anteriores — outro cenário, ângulo, enquadramento e composição — mantendo o mesmo segmento e a identidade do negócio.",
-    historicoCenas.length
-      ? "EVITE estas cenas já usadas por este cliente (crie algo claramente diferente delas): "
-        + historicoCenas.map((c, i) => `(${i + 1}) ${c}`).join("; ") + "."
-      : "",
-    // Regra de composição — explica o MOTIVO, não só a regra: a imagem receberá
-    // uma camada gráfica por cima, então certas áreas precisam ficar livres.
-    "COMPOSIÇÃO PARA CAMADA GRÁFICA (regra mais importante): esta imagem vai receber uma camada gráfica por cima. Os 20% do topo e os 20% da base desta imagem serão cobertos por uma faixa colorida, pelo logo da marca e por um texto grande. Por isso essas duas áreas precisam ficar visualmente calmas: sem nada importante, sem detalhe fino, sem alto contraste.",
-    "Todo o assunto principal — produto, pessoa, animal, rostos, mãos — deve ficar inteiramente dentro dos 60% centrais. Se o assunto for um animal ou uma pessoa, enquadre de modo que a cabeça e o rosto fiquem no miolo, nunca nas faixas de cima ou de baixo.",
-    "O que PODE aparecer nas faixas de cima e de baixo: fundo desfocado, parede lisa, superfície vazia, céu, bokeh, sombra suave, degradê natural de luz.",
-    "O que NÃO PODE aparecer nas faixas: rostos, olhos, o produto em si, mãos, letreiros ou qualquer texto, e elementos com muito detalhe ou contraste forte.",
-    "REGRA DE ROSTO (muito importante): se houver pessoas na cena, o rosto inteiro — do topo da cabeça ao queixo — deve ficar COMPLETAMENTE dentro dos 60% centrais da imagem. Nenhuma parte de rosto ou cabeça pode entrar nos 20% de cima nem nos 20% de baixo. MOTIVO: sobre os 20% de cima será aplicada uma faixa escura com a frase do post, e sobre os 20% de baixo o logo e a chamada para ação — qualquer rosto nessas faixas será coberto e o post fica perdido. Para conseguir isso, enquadre as pessoas um pouco mais afastadas ou mais baixas na cena, de modo que cabeça e ombros caibam folgados no miolo. O QUE PODE aparecer nas faixas de 20%: teto, parede, prateleira desfocada, balcão, chão, fundo neutro. O QUE NÃO PODE: rosto, cabeça, produto principal ou qualquer elemento que precise ser visto.",
     "A imagem continua limpa: SEM TEXTO, SEM LETRAS, SEM PALAVRAS, sem números e sem logotipos.",
     "Qualidade profissional: iluminação cuidada, composição harmoniosa, aparência premium, foco nítido.",
   ].join(" ");
@@ -1248,7 +1243,7 @@ function PainelDev() {
     "Bloco do histórico anti-repetição enviado ao Claude:",
     d.historicoTexto || "(nenhum — primeiro post deste cliente)",
     "",
-    "Cenas já usadas, enviadas à IA de imagem:",
+    "Cenas já usadas por este cliente (NÃO são enviadas à IA de imagem):",
     d.historicoCenas.length
       ? d.historicoCenas.map((c, i) => `(${i + 1}) ${c}`).join("\n")
       : "(nenhuma)",
