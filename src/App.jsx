@@ -134,7 +134,7 @@ const NEGOCIO = {
 // diferente e o feed não fique repetitivo. Hoje mora no localStorage;
 // quando migrar pro backend, só estas funções mudam.
 // ============================================================
-const HIST_NEG_MAX = 5; // guardamos só os últimos 5 posts do cliente
+const HIST_NEG_MAX = 20; // guardamos só os últimos 20 posts do cliente
 
 // Chave por cliente (nunca global), ancorada no identificador estável do
 // cliente (clienteId) — a mesma âncora dos créditos/cota/config. Ver
@@ -170,12 +170,26 @@ function registrarPostNegocio(profile, resumo) {
   }
 }
 
+// Etiqueta curta da cena que vai para o histórico. Usa o resumo_cena que a
+// nossa IA devolve (rótulo de até 8 palavras); se vier vazio ou faltando, cai
+// nas 12 primeiras palavras da descricao_fundo — reserva para o histórico
+// nunca ficar sem cena, e nunca guardamos a descrição inteira.
+function cenaParaHistorico(j) {
+  const etiqueta = (j?.resumo_cena || "").trim();
+  if (etiqueta) return etiqueta;
+  const fundo = (j?.descricao_fundo || "").trim();
+  return fundo ? fundo.split(/\s+/).slice(0, 12).join(" ") : "";
+}
+
 // Monta o trecho do prompt (texto) que leva o histórico à nossa IA, com
 // a instrução explícita e o MOTIVO de variar. Vazio quando não há histórico.
 function blocoHistoricoParaTexto(hist) {
   if (!hist.length) return "";
   const linhas = hist.map((h, i) =>
-    `${i + 1}. Cena: ${h.resumoCena || "-"} | Tema do texto: ${h.temaTexto || "-"}`
+    // h.resumoCena é o campo ANTIGO (guardava a descricao_fundo inteira):
+    // lido como reserva para os históricos já salvos no navegador do cliente
+    // não virarem "-" até saírem da janela. Itens novos usam h.cena.
+    `${i + 1}. Cena: ${h.cena || h.resumoCena || "-"} | Tema do texto: ${h.temaTexto || "-"}`
     + ` | Tom: ${h.tom || "-"} | Cor: ${h.corDestaque || "-"}`
   ).join("\n");
   return [
@@ -683,6 +697,7 @@ async function gerarPostNegocioReal(profile) {
     '- "legenda": legenda do post para o Instagram, calorosa e profissional, coerente com o texto_imagem.',
     '- "texto_imagem": texto CURTO (poucas palavras, cabe em até 2 linhas) que será aplicado por cima da imagem.',
     '- "descricao_fundo": descrição do cenário para a IA de imagem, em UMA ÚNICA FRASE CORRIDA de NO MÁXIMO 100 PALAVRAS (não use listas, tópicos nem várias frases). A descrição deve COMEÇAR pelo enquadramento. É PROIBIDO usar as palavras "fechado", "close", "close-up" ou "plano médio fechado". Em cenas COM PESSOAS, o enquadramento deve ser "plano americano" ou "plano aberto" (nunca "plano médio", que é da cintura para cima e deixa a cabeça alta demais), com a pessoa afastada da câmera e espaço vazio acima da cabeça; "plano médio" só é permitido em cenas SEM PESSOAS. SEM texto/letras/palavras na cena. Descreva uma FOTOGRAFIA REAL (não ilustração/desenho/3D), de preferência com pessoas reais, com astral positivo e acolhedor, e faça a cena ALUDIR ao texto_imagem (imagem e texto conversam). Em cenas SEM PESSOAS, o assunto principal fica CENTRALIZADO (no miolo da imagem). Em cenas COM PESSOAS, é PROIBIDO escrever que o produto, o objeto ou as mãos ficam "centralizados", "no meio" ou "no centro da imagem": quem ocupa a faixa central é o ROSTO, e o produto aparece logo ABAIXO do rosto, na altura do peito ou do balcão — a frase precisa dizer isso de forma explícita. O topo e a base ficam calmos, com fundo neutro e desfocado. Uso interno.',
+    '- "resumo_cena": etiqueta CURTA de NO MÁXIMO 8 PALAVRAS que identifica o TIPO de cena da descricao_fundo, para servir de memória entre posts. É um RÓTULO, não uma descrição: sem enquadramento, sem luz, sem adjetivos de estilo. Exemplos: "cliente escolhendo capinha em expositor giratório", "técnico consertando notebook na bancada", "entrega de pacote na porta". Uso interno.',
     '- "cta": chamada para ação curta.',
     '- "hashtags": array de 4 a 6 hashtags do segmento (sem espaços dentro de cada uma).',
     "",
@@ -739,8 +754,8 @@ async function gerarPostNegocioReal(profile) {
   // As cenas já usadas NÃO vão à IA de imagem (gerador não entende negação:
   // descrever a cena indesejada faz ele reproduzi-la). A anti-repetição é
   // feita no Claude; aqui a lista serve só para o painel de desenvolvedor.
-  const historicoCenas = hist.map((h) => h.resumoCena).filter(Boolean);
-  const { imagem, resumoCena, promptImagem, msImagem } =
+  const historicoCenas = hist.map((h) => h.cena || h.resumoCena).filter(Boolean);
+  const { imagem, promptImagem, msImagem } =
     await gerarImagemLimpaNegocio(j);
 
   if (dbg) {
@@ -755,7 +770,7 @@ async function gerarPostNegocioReal(profile) {
   // Registra este post no histórico anti-repetição (só texto, nunca a imagem)
   // para orientar as próximas gerações deste cliente.
   registrarPostNegocio(profile, {
-    resumoCena,
+    cena: cenaParaHistorico(j),
     temaTexto: [(j.texto_imagem || "").trim(), (j.cta || "").trim()].filter(Boolean).join(" · "),
     tom: tons,
     corDestaque: corDeLayout(profile),
