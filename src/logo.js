@@ -1,8 +1,18 @@
 // ============================================================
-// FUNDO DO LOGO — remoção no NAVEGADOR (canvas), sem biblioteca
-// Apaga o fundo sólido (quase sempre branco) que vem no logo do
-// cliente e devolve um PNG com transparência, para o logo aparecer
-// direto sobre o cartão/imagem do post em vez de um quadrado branco.
+// FUNDO DO LOGO — remoção e ENQUADRAMENTO no NAVEGADOR (canvas),
+// sem biblioteca. Duas coisas, INDEPENDENTES uma da outra:
+//
+// 1) Apaga o fundo sólido (quase sempre branco) que vem no logo do
+//    cliente e devolve um PNG com transparência, para o logo aparecer
+//    direto sobre o cartão/imagem do post em vez de um quadrado branco.
+// 2) Recorta a imagem justa no desenho, com uma margem de respiro.
+//    Muito logo chega com bastante espaço vazio em volta e, como o app
+//    mantém a proporção, aparece pequeno no post — e a margem ainda
+//    atrapalha a leitura da cor da marca. O recorte acontece mesmo
+//    quando o fundo NÃO é removido, desde que dê para localizar o
+//    desenho com segurança (fundo transparente ou cor sólida). Em
+//    fundo de foto/degradê não recortamos: logo com margem é melhor
+//    que logo cortado no lugar errado.
 //
 // Roda UMA VEZ, no envio do logo — nunca a cada post. NÃO usa serviço
 // externo (zero custo por imagem) e não adiciona dependência: é o
@@ -32,6 +42,12 @@ const DISPERSAO_MAX = 26;
 // Faixas de sanidade do resultado (fração de pixels removidos).
 const REMOCAO_MIN = 0.02; // abaixo disso não fez nada de útil
 const REMOCAO_MAX = 0.92; // acima disso apagaria o próprio logo
+
+// Recorte no conteúdo: a caixa precisa render alguma coisa e fazer sentido.
+const RECORTE_SEM_GANHO = 0.98; // caixa deste tamanho já é a imagem inteira
+const RECORTE_AREA_MIN = 0.05;  // caixa menor que isso = detecção suspeita
+const RESPIRO = 0.04;           // margem de respiro: 4% do maior lado do desenho
+const RESPIRO_MIN = 4;          // ...nunca menos que 4px
 
 // Distância euclidiana entre duas cores RGB.
 function distancia(r1, g1, b1, r2, g2, b2) {
@@ -82,38 +98,80 @@ function analisarBorda(data, w, h) {
   return { r, g, b, dispersao: soma / idx.length };
 }
 
-// Apara as margens totalmente transparentes. Depois de tirar o quadrado
-// do fundo costuma sobrar bastante margem vazia, o que faz o logo
-// parecer pequeno dentro do cartão do post.
-function aparar(canvas, ctx, w, h) {
-  const { data } = ctx.getImageData(0, 0, w, h);
-  let minX = w, minY = h, maxX = -1, maxY = -1;
+// Um pixel faz parte do DESENHO do logo? Dois critérios, escolhidos pelo
+// mesmo sinal que a remoção de fundo já usa para saber o que é fundo:
+//   "alfa" — fundo transparente (veio assim ou acabou de ser removido)
+//   "cor"  — fundo sólido preservado: é desenho o que foge da cor da borda
+function ehDesenho(criterio, data, p, borda) {
+  const i = p * 4;
+  if (data[i + 3] <= 8) return false;
+  if (criterio === "alfa") return true;
+  return distancia(data[i], data[i + 1], data[i + 2], borda.r, borda.g, borda.b) > TOLERANCIA;
+}
+
+// Caixa do conteúdo (bounding box) do desenho. Contamos os pixels de desenho
+// POR LINHA e POR COLUNA em vez de pegar o min/max cru: um único pixel de
+// ruído (JPEG, sujeira num canto) esticaria a caixa até a imagem inteira e o
+// recorte não faria nada. Uma linha só entra na caixa se tiver um punhado de
+// pixels de desenho. Devolve null quando não há conteúdo suficiente.
+function caixaDoConteudo(data, w, h, criterio, borda) {
+  const porLinha = new Uint32Array(h);
+  const porColuna = new Uint32Array(w);
   for (let y = 0; y < h; y++) {
     for (let x = 0; x < w; x++) {
-      if (data[(y * w + x) * 4 + 3] > 8) {
-        if (x < minX) minX = x;
-        if (x > maxX) maxX = x;
-        if (y < minY) minY = y;
-        if (y > maxY) maxY = y;
-      }
+      if (!ehDesenho(criterio, data, y * w + x, borda)) continue;
+      porLinha[y]++;
+      porColuna[x]++;
     }
   }
-  if (maxX < minX || maxY < minY) return canvas; // nada sobrou: devolve como está
 
-  const lw = maxX - minX + 1, lh = maxY - minY + 1;
-  if (lw === w && lh === h) return canvas;       // não havia margem
+  const minPorLinha = Math.max(2, Math.round(w * 0.003));
+  const minPorColuna = Math.max(2, Math.round(h * 0.003));
+  let minY = -1, maxY = -1, minX = -1, maxX = -1;
+  for (let y = 0; y < h; y++) if (porLinha[y] >= minPorLinha) { if (minY < 0) minY = y; maxY = y; }
+  for (let x = 0; x < w; x++) if (porColuna[x] >= minPorColuna) { if (minX < 0) minX = x; maxX = x; }
+  if (minY < 0 || minX < 0) return null;
+
+  return { x: minX, y: minY, w: maxX - minX + 1, h: maxY - minY + 1 };
+}
+
+// Recorta o canvas justo no desenho, com uma margem de respiro (nunca colado
+// no traço). Devolve { canvas, motivo }: canvas null quando não dá para
+// localizar com segurança ou quando não há ganho — aí o chamador segue com a
+// imagem inteira, porque logo com margem é melhor que logo cortado errado.
+function recortarNoConteudo(canvas, ctx, w, h, criterio, borda) {
+  const { data } = ctx.getImageData(0, 0, w, h);
+  const caixa = caixaDoConteudo(data, w, h, criterio, borda);
+  if (!caixa) return { canvas: null, motivo: "não encontrei o desenho dentro da imagem" };
+
+  if ((caixa.w * caixa.h) / (w * h) < RECORTE_AREA_MIN)
+    return { canvas: null, motivo: "o desenho detectado é pequeno demais para ser confiável" };
+  if (caixa.w >= w * RECORTE_SEM_GANHO && caixa.h >= h * RECORTE_SEM_GANHO)
+    return { canvas: null, motivo: "o logo já preenche o quadro" };
+
+  const respiro = Math.max(RESPIRO_MIN, Math.round(Math.max(caixa.w, caixa.h) * RESPIRO));
+  const x = Math.max(0, caixa.x - respiro);
+  const y = Math.max(0, caixa.y - respiro);
+  const lw = Math.min(w, caixa.x + caixa.w + respiro) - x;
+  const lh = Math.min(h, caixa.y + caixa.h + respiro) - y;
+  if (lw === w && lh === h)
+    return { canvas: null, motivo: "a margem de respiro já cobre a imagem inteira" };
 
   const corte = document.createElement("canvas");
   corte.width = lw; corte.height = lh;
-  corte.getContext("2d").drawImage(canvas, minX, minY, lw, lh, 0, 0, lw, lh);
-  return corte;
+  corte.getContext("2d").drawImage(canvas, x, y, lw, lh, 0, 0, lw, lh);
+  return { canvas: corte, motivo: "" };
 }
 
-// Remove o fundo do logo. SEMPRE resolve — nunca lança:
-//   { url, semFundo, motivo }
-// Em qualquer desistência, url é o dataUrl original e semFundo é false.
+// Remove o fundo do logo e o enquadra no desenho. SEMPRE resolve — nunca lança:
+//   { url, semFundo, motivo, recortado, motivoRecorte }
+// semFundo e recortado são independentes: há logo recortado que mantém o fundo.
+// Em qualquer desistência dos dois, url é o dataUrl original.
 export async function removerFundoLogo(dataUrl) {
-  const manter = (motivo) => ({ url: dataUrl, semFundo: false, motivo });
+  // Devolve o logo exatamente como veio. Por padrão o motivo do não-recorte é
+  // o mesmo da não-remoção (fundo fotográfico, por exemplo, impede os dois).
+  const manter = (motivo, motivoRecorte = motivo) =>
+    ({ url: dataUrl, semFundo: false, motivo, recortado: false, motivoRecorte });
 
   if (!dataUrl) return manter("sem logo");
 
@@ -123,18 +181,39 @@ export async function removerFundoLogo(dataUrl) {
     const data = imagem.data;
     const total = w * h;
 
-    // 1) Já tem transparência? É um PNG que veio pronto — não mexemos.
+    // 1) Já tem transparência? É um PNG que veio pronto — não há fundo a tirar.
     // Exige uma fração mínima, não um pixel solto: ícone exportado costuma
     // ter um ou dois pixels de alfa no canto sem ter fundo transparente.
     let transparentes = 0;
     for (let i = 3; i < data.length; i += 4) if (data[i] < 10) transparentes++;
-    if (transparentes / total > 0.01) return manter("o logo já tem fundo transparente");
+    if (transparentes / total > 0.01) {
+      // Não há fundo a remover, mas o alfa diz com segurança onde está o
+      // desenho — então ainda dá para enquadrar. Recorte e transparência
+      // são decisões independentes.
+      const motivo = "o logo já tem fundo transparente";
+      const corte = recortarNoConteudo(canvas, ctx, w, h, "alfa", null);
+      if (!corte.canvas) return manter(motivo, corte.motivo);
+      return { url: corte.canvas.toDataURL("image/png"), semFundo: false, motivo, recortado: true, motivoRecorte: "" };
+    }
 
-    // 2) O fundo é sólido? Se a borda varia muito, é foto/degradê.
+    // 2) O fundo é sólido? Se a borda varia muito, é foto/degradê — aí não dá
+    // para saber onde o fundo termina, e um recorte errado comeria o próprio
+    // logo. Nesse caso não removemos NEM recortamos.
     const borda = analisarBorda(data, w, h);
     if (borda.dispersao > DISPERSAO_MAX) {
       return manter("o fundo do logo não é sólido (parece foto ou degradê)");
     }
+
+    // Fundo sólido que a remoção não soube apagar: a borda é uniforme, então
+    // o desenho ainda pode ser localizado pela distância de cor. Enquadramos
+    // mantendo a cor de fundo do cliente — logo maior, fundo dele preservado.
+    // Lê os pixels do canvas, que continua com a imagem original (o flood fill
+    // abaixo mexe numa cópia e só volta pro canvas no passo 5).
+    const enquadrarComFundo = (motivo) => {
+      const corte = recortarNoConteudo(canvas, ctx, w, h, "cor", borda);
+      if (!corte.canvas) return manter(motivo, corte.motivo);
+      return { url: corte.canvas.toDataURL("image/png"), semFundo: false, motivo, recortado: true, motivoRecorte: "" };
+    };
 
     // 3) Flood fill a partir de TODA a moldura, com pilha (nunca
     // recursão: um logo de 512px tem 260 mil pixels e estouraria a
@@ -165,8 +244,8 @@ export async function removerFundoLogo(dataUrl) {
 
     // 4) Sanidade: nem quase nada, nem quase tudo.
     const fracao = removidos / total;
-    if (fracao < REMOCAO_MIN) return manter("não encontrei um fundo para remover");
-    if (fracao > REMOCAO_MAX) return manter("a remoção apagaria quase todo o logo");
+    if (fracao < REMOCAO_MIN) return enquadrarComFundo("não encontrei um fundo para remover");
+    if (fracao > REMOCAO_MAX) return enquadrarComFundo("a remoção apagaria quase todo o logo");
 
     // 5) Suaviza a borda do recorte: pixel mantido que faz fronteira com
     // um removido ganha alfa proporcional à distância da cor de fundo.
@@ -196,9 +275,14 @@ export async function removerFundoLogo(dataUrl) {
 
     ctx.putImageData(imagem, 0, 0);
 
-    // 6) Apara a margem vazia e exporta em PNG (o formato com alfa).
-    const final = aparar(canvas, ctx, w, h);
-    return { url: final.toDataURL("image/png"), semFundo: true, motivo: "" };
+    // 6) Recorta no desenho (o fundo virou transparência, então o alfa diz
+    // onde ele está) e exporta em PNG, o formato com alfa.
+    const corte = recortarNoConteudo(canvas, ctx, w, h, "alfa", borda);
+    const final = corte.canvas || canvas;
+    return {
+      url: final.toDataURL("image/png"), semFundo: true, motivo: "",
+      recortado: !!corte.canvas, motivoRecorte: corte.motivo,
+    };
   } catch (e) {
     console.error("Falha ao remover o fundo do logo, mantendo o original:", e);
     return manter("erro ao processar a imagem");
@@ -211,6 +295,9 @@ export async function prepararLogoEnviado(dataUrl) {
   const r = await removerFundoLogo(dataUrl);
   if (!r.semFundo && r.motivo) {
     console.warn("Logo mantido com o fundo original —", r.motivo);
+  }
+  if (!r.recortado && r.motivoRecorte) {
+    console.warn("Logo mantido sem recorte —", r.motivoRecorte);
   }
   return r;
 }
