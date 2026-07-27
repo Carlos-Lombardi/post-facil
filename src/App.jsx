@@ -123,7 +123,7 @@ function corDeLayout(profile) {
 const NEGOCIO = {
   onda: "M0,1350 L0,1336 C380,1306 780,1288 1080,1128 L1080,1350 Z", // onda na base
   grad: { y: 0, h: 365, stops: [[0, 0.82], [0.45, 0.38], [1, 0]] },   // degradê no topo (legibilidade do texto)
-  logo: { bottom: 33 / 1350, right: 50 / 1080 },  // logo no rodapé, à direita
+  logo: { bottom: 23 / 1350, right: 50 / 1080 },  // logo no rodapé, à direita (10px mais baixo que o desenho)
   texto: { pos: "cima", offset: 5.9 },            // baselines 150/248 → ~5,9% do topo
 };
 
@@ -834,6 +834,7 @@ async function gerarImagemLimpaNegocio(j, historicoCenas = []) {
     "Todo o assunto principal — produto, pessoa, animal, rostos, mãos — deve ficar inteiramente dentro dos 60% centrais. Se o assunto for um animal ou uma pessoa, enquadre de modo que a cabeça e o rosto fiquem no miolo, nunca nas faixas de cima ou de baixo.",
     "O que PODE aparecer nas faixas de cima e de baixo: fundo desfocado, parede lisa, superfície vazia, céu, bokeh, sombra suave, degradê natural de luz.",
     "O que NÃO PODE aparecer nas faixas: rostos, olhos, o produto em si, mãos, letreiros ou qualquer texto, e elementos com muito detalhe ou contraste forte.",
+    "REGRA DE ROSTO (muito importante): se houver pessoas na cena, o rosto inteiro — do topo da cabeça ao queixo — deve ficar COMPLETAMENTE dentro dos 60% centrais da imagem. Nenhuma parte de rosto ou cabeça pode entrar nos 20% de cima nem nos 20% de baixo. MOTIVO: sobre os 20% de cima será aplicada uma faixa escura com a frase do post, e sobre os 20% de baixo o logo e a chamada para ação — qualquer rosto nessas faixas será coberto e o post fica perdido. Para conseguir isso, enquadre as pessoas um pouco mais afastadas ou mais baixas na cena, de modo que cabeça e ombros caibam folgados no miolo. O QUE PODE aparecer nas faixas de 20%: teto, parede, prateleira desfocada, balcão, chão, fundo neutro. O QUE NÃO PODE: rosto, cabeça, produto principal ou qualquer elemento que precise ser visto.",
     "A imagem continua limpa: SEM TEXTO, SEM LETRAS, SEM PALAVRAS, sem números e sem logotipos.",
     "Qualidade profissional: iluminação cuidada, composição harmoniosa, aparência premium, foco nítido.",
   ].join(" ");
@@ -1079,13 +1080,15 @@ function OverlayNegocio({ cor, logo, logoSemFundo, destaque, sub }) {
 
   return (
     <>
-      {/* onda + degradê recoloridos pela cor da marca (uma variável única) */}
+      {/* onda do rodapé recolorida pela cor da marca; o degradê do topo é
+          PRETO FIXO — ele existe só para dar leitura à frase do post, e um
+          preto neutro funciona sobre qualquer foto e com qualquer marca. */}
       <svg viewBox="0 0 1080 1350" preserveAspectRatio="none"
            style={{ position: "absolute", inset: 0, width: "100%", height: "100%", pointerEvents: "none" }}>
         <defs>
           <linearGradient id={gid} x1="0" y1="0" x2="0" y2="1">
             {L.grad.stops.map(([off, op], k) => (
-              <stop key={k} offset={off} stopColor={cor} stopOpacity={op} />
+              <stop key={k} offset={off} stopColor="#000000" stopOpacity={op} />
             ))}
           </linearGradient>
         </defs>
