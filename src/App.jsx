@@ -682,7 +682,7 @@ async function gerarPostNegocioReal(profile) {
     "Responda SEMPRE em português do Brasil e APENAS com um JSON válido, sem texto antes ou depois, sem cercas de código. O JSON tem exatamente estas chaves:",
     '- "legenda": legenda do post para o Instagram, calorosa e profissional, coerente com o texto_imagem.',
     '- "texto_imagem": texto CURTO (poucas palavras, cabe em até 2 linhas) que será aplicado por cima da imagem.',
-    '- "descricao_fundo": descrição do cenário para a IA de imagem, SEM texto/letras/palavras na cena. Descreva uma FOTOGRAFIA REAL (não ilustração/desenho/3D), de preferência com pessoas reais, com astral positivo e acolhedor, e faça a cena ALUDIR ao texto_imagem (imagem e texto conversam). O assunto principal fica CENTRALIZADO (no miolo da imagem); o topo e a base ficam calmos, com fundo neutro e desfocado. Uso interno.',
+    '- "descricao_fundo": descrição do cenário para a IA de imagem, em UMA ÚNICA FRASE CORRIDA de NO MÁXIMO 100 PALAVRAS (não use listas, tópicos nem várias frases). SEM texto/letras/palavras na cena. Descreva uma FOTOGRAFIA REAL (não ilustração/desenho/3D), de preferência com pessoas reais, com astral positivo e acolhedor, e faça a cena ALUDIR ao texto_imagem (imagem e texto conversam). O assunto principal fica CENTRALIZADO (no miolo da imagem); o topo e a base ficam calmos, com fundo neutro e desfocado. Uso interno.',
     '- "cta": chamada para ação curta.',
     '- "hashtags": array de 4 a 6 hashtags do segmento (sem espaços dentro de cada uma).',
     "",
@@ -725,7 +725,7 @@ async function gerarPostNegocioReal(profile) {
   }
 
   const t0Texto = performance.now();
-  const texto = await gerarTexto(system, user, 1200);
+  const texto = await gerarTexto(system, user, 3000);
   if (dbg) {
     dbg.msTexto = Math.round(performance.now() - t0Texto);
     dbg.jsonCru = texto;   // cru, exatamente como veio (antes de extrairJSON)
