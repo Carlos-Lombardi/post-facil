@@ -123,7 +123,7 @@ function corDeLayout(profile) {
 const NEGOCIO = {
   onda: "M0,1350 L0,1336 C380,1306 780,1288 1080,1128 L1080,1350 Z", // onda na base
   grad: { y: 0, h: 365, stops: [[0, 0.82], [0.45, 0.38], [1, 0]] },   // degradê no topo (legibilidade do texto)
-  logo: { bottom: 33 / 1350, right: 50 / 1080 },  // cartão claro no rodapé, à direita
+  logo: { bottom: 33 / 1350, right: 50 / 1080 },  // logo no rodapé, à direita
   texto: { pos: "cima", offset: 5.9 },            // baselines 150/248 → ~5,9% do topo
 };
 
@@ -1053,19 +1053,21 @@ function OverlayNegocio({ cor, logo, logoSemFundo, destaque, sub }) {
   const gid = "pfgrad-neg";
   const cta = String(sub || "").trim();
 
-  // Cartão claro do logo: quadrado de 222/1080 = 20,56% da largura (222×222 no
-  // viewBox 1080×1350). box-sizing border-box para o padding NÃO somar à largura
-  // (o app não tem reset global de box-sizing); assim o cartão fica exatamente
-  // em 20,56cqi, sem escala extra. Padding em cqi só para o logo respirar dentro.
-  const ladoCartao = (222 / 1080) * 100; // ~20.56% da largura
-  const posCartao = {
+  // Área do logo: quadrado de 222/1080 = 20,56% da largura (222×222 no viewBox
+  // 1080×1350). Caixa transparente — o logo é desenhado direto sobre a imagem.
+  // box-sizing border-box para o padding NÃO somar à largura (o app não tem
+  // reset global de box-sizing); assim a área fica exatamente em 20,56cqi, sem
+  // escala extra. O padding de 2cqi continua: é ele que define o tamanho final
+  // do desenho do logo (~16,56cqi), o mesmo de sempre.
+  const ladoLogo = (222 / 1080) * 100; // ~20.56% da largura
+  const posLogo = {
     position: "absolute", boxSizing: "border-box",
-    width: ladoCartao + "cqi", height: ladoCartao + "cqi",
+    width: ladoLogo + "cqi", height: ladoLogo + "cqi",
   };
-  if (L.logo.top != null) posCartao.top = L.logo.top * 100 + "%";
-  if (L.logo.bottom != null) posCartao.bottom = L.logo.bottom * 100 + "%";
-  if (L.logo.left != null) posCartao.left = L.logo.left * 100 + "%";
-  if (L.logo.right != null) posCartao.right = L.logo.right * 100 + "%";
+  if (L.logo.top != null) posLogo.top = L.logo.top * 100 + "%";
+  if (L.logo.bottom != null) posLogo.bottom = L.logo.bottom * 100 + "%";
+  if (L.logo.left != null) posLogo.left = L.logo.left * 100 + "%";
+  if (L.logo.right != null) posLogo.right = L.logo.right * 100 + "%";
 
   // Faixa do texto (cima ou baixo), ancorada na borda com o offset do desenho.
   const boxTexto = {
@@ -1091,21 +1093,22 @@ function OverlayNegocio({ cor, logo, logoSemFundo, destaque, sub }) {
         <path d={L.onda} fill={cor} />
       </svg>
 
-      {/* cartão claro com o logo do cliente (ou "LOGO" de exemplo).
-          rx=30/1080=2,78cqi. */}
-      <div style={{ ...posCartao, borderRadius: "2.78cqi", background: "#EFE6D9",
-                    boxShadow: "0 4px 14px rgba(0,0,0,.18)", padding: "2cqi",
-                    display: "flex", alignItems: "center", justifyContent: "center", overflow: "hidden" }}>
+      {/* logo do cliente (ou "LOGO" de exemplo) direto sobre a imagem, SEM
+          cartão atrás — nem no fallback. A caixa aqui só posiciona e reserva o
+          espaço; nada de fundo, borda ou sombra retangular. */}
+      <div style={{ ...posLogo, padding: "2cqi",
+                    display: "flex", alignItems: "center", justifyContent: "center" }}>
         {logo
           ? <img src={logo} alt="logo" style={{
               width: "100%", height: "100%", objectFit: "contain",
               // Sombra esfumaçada só no logo SEM fundo: drop-shadow segue o
               // canal alfa e contorna o desenho do logo. Num logo que ainda
-              // tem o quadrado de fundo ela contornaria o quadrado, então
-              // nesse caso não entra.
+              // tem o quadrado de fundo (fallback da remoção) ela contornaria
+              // esse quadrado e viraria um retângulo, então nesse caso não entra.
               filter: logoSemFundo ? "drop-shadow(0 0.25cqi 0.5cqi rgba(0,0,0,.38))" : "none",
             }} />
-          : <span style={{ color: "#9a9086", fontWeight: 700, fontSize: "3.15cqi", letterSpacing: "0.15em" }}>LOGO</span>}
+          : <span style={{ color: "#fff", fontWeight: 700, fontSize: "3.15cqi", letterSpacing: "0.15em",
+                           textShadow: "0 0.2cqi 0.5cqi rgba(0,0,0,.55)" }}>LOGO</span>}
       </div>
 
       {/* texto grande na faixa reservada, com a sombra difusa do desenho.
@@ -1122,9 +1125,9 @@ function OverlayNegocio({ cor, logo, logoSemFundo, destaque, sub }) {
         ))}
       </div>
 
-      {/* CTA curto no rodapé, à ESQUERDA do cartão do logo. Fica ACIMA da onda
+      {/* CTA curto no rodapé, à ESQUERDA do logo. Fica ACIMA da onda
           (nunca por cima dela) e CENTRADO no vão livre que vai da margem
-          esquerda até a lateral do cartão do logo. A caixa é a faixa desse vão;
+          esquerda até a lateral da área do logo. A caixa é a faixa desse vão;
           a pílula translúcida (que garante leitura sobre qualquer imagem) é
           centralizada dentro dela. Só aparece quando há CTA. */}
       {cta && (
@@ -1133,8 +1136,8 @@ function OverlayNegocio({ cor, logo, logoSemFundo, destaque, sub }) {
           // A onda sobe da esquerda (y≈1336) para a direita (y≈1250 no fim do
           // vão). Base em 1200/1350 deixa ~50px de respiro entre a pílula e a onda.
           bottom: (150 / 1350) * 100 + "%",
-          left: (50 / 1080) * 100 + "%",    // mesma margem lateral do cartão do logo
-          right: (316 / 1080) * 100 + "%",  // para na lateral do cartão, com folga (~44px)
+          left: (50 / 1080) * 100 + "%",    // mesma margem lateral do logo
+          right: (316 / 1080) * 100 + "%",  // para na lateral do logo, com folga (~44px)
           display: "flex", justifyContent: "center",
           pointerEvents: "none",
         }}>
