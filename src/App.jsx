@@ -84,6 +84,8 @@ function novoDebugNegocio() {
     historicoCenas: [],   // cenas já usadas (só leitura; não vão à IA de imagem)
     msTexto: null,        // duração da chamada de texto
     msImagem: null,       // duração da chamada de imagem
+    passo: "início",      // etapa em andamento (o painel mostra onde parou)
+    erro: null,           // { mensagem, tipo, origem, passo, impacto, pilha, em }
     em: new Date(),
   };
   return debugNegocio;
@@ -91,6 +93,52 @@ function novoDebugNegocio() {
 
 function lerDebugNegocio() {
   return debugNegocio;
+}
+
+// Quantas linhas do stack o painel guarda: as primeiras já dizem onde quebrou,
+// e o resto é ruído do React/navegador.
+const PILHA_LINHAS = 5;
+
+// Marca a etapa em andamento. Escreve no espelho de leitura e mais nada — com
+// o painel desligado, debugNegocio é null e a função não faz nada.
+function marcarPasso(passo) {
+  if (debugNegocio) debugNegocio.passo = passo;
+}
+
+// Mascara qualquer coisa com cara de chave/token que apareça numa mensagem de
+// erro. As chaves ficam no servidor e não passam pelo app, mas mensagem de erro
+// de rede às vezes carrega URL com query — melhor cortar aqui do que confiar.
+function limparSegredos(texto) {
+  return String(texto || "")
+    .replace(/\b(sk|pk|api[_-]?key|token|authorization|bearer)\b\s*[:=]?\s*\S+/gi, "$1 ***")
+    .replace(/([?&](?:key|api_key|token|access_token)=)[^&\s]+/gi, "$1***");
+}
+
+// Nome da função do primeiro quadro do stack ("at gerarPostNegocioReal (...)").
+// No build de produção os nomes são minificados — por isso o "Parou em" do
+// painel vem do passo marcado, que continua legível.
+function funcaoDoStack(stack) {
+  const linha = String(stack || "").split("\n").find((l) => /\bat\s+\S/.test(l));
+  const m = linha && linha.match(/at\s+([\w$.<>]+)/);
+  return m ? m[1] : "";
+}
+
+// Registra a falha da última geração para o painel. NÃO altera o fluxo: quem
+// chama já tratou o erro do seu jeito (fallback pro demo, placeholder da
+// imagem) e só passa por aqui para deixar o rastro visível.
+function registrarErroNegocio(e, impacto) {
+  if (!DEV_ON) return;
+  if (!debugNegocio) novoDebugNegocio(); // falhou antes de começar a registrar
+  const pilha = String(e?.stack || "").split("\n").slice(0, PILHA_LINHAS).join("\n");
+  debugNegocio.erro = {
+    mensagem: limparSegredos(e?.message || e),
+    tipo: e?.name || "Error",
+    origem: funcaoDoStack(e?.stack) || debugNegocio.passo,
+    passo: debugNegocio.passo,
+    impacto,
+    pilha: limparSegredos(pilha),
+    em: new Date(),
+  };
 }
 
 // ============================================================
@@ -545,6 +593,7 @@ function FluxoGeracao({ tipo, profile, onSair }) {
       gerarPostNegocioReal(profile)
         .then((real) => setResultado(real))
         .catch((e) => {
+          registrarErroNegocio(e, "o post inteiro caiu no modo demonstração");
           // Se a nossa IA falhar, cai no demo pra não travar a tela.
           console.error("Geração real falhou, usando demo:", e);
           setResultado(montarResultadoDemo({ tipo, profile, campos }));
@@ -732,6 +781,7 @@ async function gerarPostNegocioReal(profile) {
     .filter(Boolean)
     .join("\n");
 
+  marcarPasso("montagem do prompt do texto");
   if (dbg) {
     dbg.promptPadrao = system;
     dbg.promptCliente = user;
@@ -739,12 +789,14 @@ async function gerarPostNegocioReal(profile) {
     dbg.corMarca = corDeLayout(profile);
   }
 
+  marcarPasso("chamada do texto (Claude)");
   const t0Texto = performance.now();
   const texto = await gerarTexto(system, user, 3000);
   if (dbg) {
     dbg.msTexto = Math.round(performance.now() - t0Texto);
     dbg.jsonCru = texto;   // cru, exatamente como veio (antes de extrairJSON)
   }
+  marcarPasso("leitura do JSON");
   const j = extrairJSON(texto);
 
   // Passo 3 da referência: a IA de imagem gera a imagem LIMPA (sem texto),
@@ -769,6 +821,7 @@ async function gerarPostNegocioReal(profile) {
 
   // Registra este post no histórico anti-repetição (só texto, nunca a imagem)
   // para orientar as próximas gerações deste cliente.
+  marcarPasso("montagem final");
   registrarPostNegocio(profile, {
     cena: cenaParaHistorico(j),
     temaTexto: [(j.texto_imagem || "").trim(), (j.cta || "").trim()].filter(Boolean).join(" · "),
@@ -778,6 +831,7 @@ async function gerarPostNegocioReal(profile) {
 
   // Mapeia o JSON real para o formato que a TelaResultado já sabe exibir.
   // descricao_fundo NÃO é exibida ao cliente (regra de negócio).
+  marcarPasso("concluído");
   return {
     legenda: (j.legenda || "").trim(),
     hashtags: normalizarHashtags(j.hashtags),
@@ -829,6 +883,7 @@ async function gerarImagemLimpaNegocio(j) {
 
   const temaMensagem = (j.texto_imagem || "").trim();
 
+  marcarPasso("montagem do prompt da imagem");
   const prompt = [
     // Regra de composição em PRIMEIRO lugar, antes da cena: o gerador segue
     // melhor o que lê primeiro. Explica o MOTIVO (a camada gráfica que entra
@@ -850,11 +905,13 @@ async function gerarImagemLimpaNegocio(j) {
   // Post é retrato tanto no feed (4:5) quanto no stories (9:16).
   const size = "1024x1536";
 
+  marcarPasso("chamada da imagem");
   const t0 = performance.now();
   try {
     const imagem = await gerarImagem(prompt, size);
     return { imagem, resumoCena, promptImagem: prompt, msImagem: Math.round(performance.now() - t0) };
   } catch (e) {
+    registrarErroNegocio(e, "só a imagem caiu no placeholder; o texto do post foi gerado");
     console.error("Geração de imagem falhou, usando placeholder:", e);
     // Mesmo falhando devolvemos o prompt e o tempo: é justamente o caso em
     // que o painel de desenvolvedor precisa mostrar o que foi enviado.
@@ -1271,6 +1328,23 @@ function PainelDev() {
       : "(nenhuma)",
   ].join("\n");
 
+  // Erro da última geração. Só chega aqui o que já foi tratado no fluxo (o
+  // fallback continua igual); este bloco existe para o erro não sumir no
+  // console. Sem chave de API: registrarErroNegocio mascara antes de guardar.
+  const erro = d.erro
+    ? [
+        "Mensagem: " + (d.erro.mensagem || "(sem mensagem)"),
+        "Tipo: " + d.erro.tipo,
+        "Onde: " + d.erro.origem,
+        "Parou em: " + d.erro.passo,
+        "Impacto: " + d.erro.impacto,
+        "Quando: " + d.erro.em.toLocaleTimeString("pt-BR"),
+        "",
+        `Stack (primeiras ${PILHA_LINHAS} linhas):`,
+        d.erro.pilha || "(sem stack)",
+      ].join("\n")
+    : "(nenhum)";
+
   return (
     <div style={caixa}>
       <div onClick={() => setAberto(!aberto)} style={cabecalho}>
@@ -1288,6 +1362,7 @@ function PainelDev() {
           <BlocoDev titulo="5 · Prompt final enviado ao gerador de imagem" conteudo={d.promptImagem} onCopiar={copiar} />
           <BlocoDev titulo="6 · Cor da marca e histórico anti-repetição" conteudo={corEHistorico} onCopiar={copiar} />
           <BlocoDev titulo="7 · Tempo de cada chamada" conteudo={tempos} onCopiar={copiar} />
+          <BlocoDev titulo="8 · Erro da última geração" conteudo={erro} onCopiar={copiar} />
           <div style={{ color: "#475569", fontSize: 10, lineHeight: 1.5, marginTop: 4 }}>
             Visível só com ?dev na URL. Nenhuma chave de API passa pelo app — elas ficam no servidor.
           </div>
