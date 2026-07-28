@@ -5,6 +5,13 @@
 // O app chama /api/claude em vez de chamar a Anthropic direto.
 // ============================================================
 
+// Duração máxima desta função no Vercel. A geração de texto passa de 30s em
+// post longo, e no limite padrão a função era cortada antes de responder — o
+// app recebia uma resposta vazia e caía no modo demonstração. 60s é o teto do
+// plano Hobby. Formato do objeto config: é o que o Vercel lê em função avulsa
+// na pasta /api (o `export const maxDuration` é a forma do Next.js).
+export const config = { maxDuration: 60 };
+
 export default async function handler(req, res) {
   // Só aceita POST
   if (req.method !== "POST") {

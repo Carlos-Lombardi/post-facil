@@ -12,14 +12,21 @@ async function postJSON(url, body) {
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(body),
   });
+  // Lê como TEXTO primeiro. Quando a função estoura o tempo limite, o que
+  // volta é uma página de erro do Vercel (HTML), não JSON — e o r.json()
+  // escondia isso atrás de um "Resposta inválida do servidor" sem pista
+  // nenhuma. Guardamos o código HTTP e o começo do corpo para o painel.
+  const corpo = await r.text();
+  const trecho = corpo.slice(0, 200).replace(/\s+/g, " ").trim() || "(corpo vazio)";
+
   let dados;
   try {
-    dados = await r.json();
+    dados = corpo ? JSON.parse(corpo) : {};
   } catch {
-    throw new Error("Resposta inválida do servidor.");
+    throw new Error(`Resposta inválida do servidor (HTTP ${r.status}): ${trecho}`);
   }
   if (!r.ok || dados.error) {
-    throw new Error(dados.error || "Erro no servidor (" + r.status + ").");
+    throw new Error(`${dados.error || "Erro no servidor"} (HTTP ${r.status}): ${trecho}`);
   }
   return dados;
 }
