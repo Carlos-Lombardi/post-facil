@@ -52,7 +52,24 @@ export default async function handler(req, res) {
     }
 
     // devolve só o texto, já montado
-    const texto = (dados.content || []).map((b) => b.text || "").join("").trim();
+    const blocos = Array.isArray(dados.content) ? dados.content : [];
+    const texto = blocos.map((b) => b.text || "").join("").trim();
+
+    // Nunca respondemos 200 sem texto: o sucesso vazio fazia o app cair no
+    // modo demonstração sem nenhuma pista do motivo — o painel mostrava
+    // "Resposta sem JSON" com o JSON cru vazio. Aqui vai o diagnóstico do que
+    // a Anthropic devolveu. Só dados da resposta: nada de chave nem cabeçalho.
+    if (!texto) {
+      return res.status(502).json({
+        error:
+          "A nossa IA respondeu sem texto." +
+          ` stop_reason: ${dados.stop_reason || "(ausente)"};` +
+          ` blocos em content: ${blocos.length};` +
+          ` tipo do primeiro bloco: ${blocos[0]?.type || "(nenhum)"};` +
+          ` amostra: ${blocos.length ? JSON.stringify(blocos).slice(0, 200) : "(nada)"}`,
+      });
+    }
+
     return res.status(200).json({ texto });
   } catch (e) {
     return res.status(500).json({ error: "Falha ao falar com a nossa IA: " + (e.message || "desconhecido") });
