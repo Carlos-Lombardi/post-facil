@@ -49,6 +49,10 @@ export function criarFicha(dados) {
     // logo.js). Só o logo transparente ganha sombra no post — sombra num
     // logo que ainda tem fundo contornaria o quadrado e ficaria pior.
     logoSemFundo: !!dados.logoSemFundo,
+    // "claro" | "escuro": brilho médio dos pixels visíveis, medido no envio
+    // (ver logo.js). O layout do post usa para escolher o contorno — logo
+    // escuro ganha halo branco; logo claro, sombra preta.
+    logoBrilho: dados.logoBrilho || null,
     criarLogoDepois: !!dados.criarLogoDepois,
     analiseLogo: dados.analiseLogo || { coresPrincipais: [], estilo: "", observacoes: "" },
     // cor da marca extraída do logo (original do cliente) e a versão ajustada

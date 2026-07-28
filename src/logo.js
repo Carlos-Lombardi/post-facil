@@ -53,6 +53,11 @@ const RECORTE_AREA_MIN = 0.05;  // caixa menor que isso = detecção suspeita
 const RESPIRO = 0.02;           // margem de segurança: 2% do maior lado da caixa
 const RESPIRO_MIN = 2;          // ...nunca menos que 2px
 
+// Limiar do brilho médio (0..255) que separa logo claro de escuro. 128 é o
+// meio da escala: acima disso o desenho é claro e pede sombra preta; abaixo,
+// é escuro e pede halo branco.
+const BRILHO_LIMIAR = 128;
+
 // Distância euclidiana entre duas cores RGB.
 function distancia(r1, g1, b1, r2, g2, b2) {
   const dr = r1 - r2, dg = g1 - g2, db = b1 - b2;
@@ -309,11 +314,38 @@ export async function removerFundoLogo(dataUrl) {
   }
 }
 
+// Brilho médio dos pixels VISÍVEIS do logo — os transparentes não entram na
+// conta. Vale para qualquer logo, inclusive os que mantiveram o fundo
+// original: aí o fundo entra na média, que é o certo, porque é ele que
+// aparece no post. Devolve "claro" | "escuro", ou null se não der para medir.
+// Nunca lança: em erro, registra no console e devolve null.
+async function brilhoDoLogo(dataUrl) {
+  try {
+    const { ctx, w, h } = await carregarNoCanvas(dataUrl);
+    const { data } = ctx.getImageData(0, 0, w, h);
+    let soma = 0, visiveis = 0;
+    for (let i = 0; i < data.length; i += 4) {
+      if (data[i + 3] < ALFA_MIN) continue;
+      // luminância percebida: o olho pesa muito mais o verde que o azul
+      soma += 0.2126 * data[i] + 0.7152 * data[i + 1] + 0.0722 * data[i + 2];
+      visiveis++;
+    }
+    if (!visiveis) return null;
+    return soma / visiveis >= BRILHO_LIMIAR ? "claro" : "escuro";
+  } catch (e) {
+    console.error("Falha ao medir o brilho do logo:", e);
+    return null;
+  }
+}
+
 // Wrapper para os pontos de envio: remove o fundo e registra no console
 // o motivo quando desiste, para nunca falhar em silêncio.
 export async function prepararLogoEnviado(dataUrl) {
   const r = await removerFundoLogo(dataUrl);
-  if (!dataUrl) return r;
+  if (!dataUrl) return { ...r, brilho: null };
+
+  // Medido sobre o logo FINAL (já recortado): é ele que vai para o post.
+  const brilho = await brilhoDoLogo(r.url);
 
   if (!r.semFundo && r.motivo) {
     console.warn("Logo mantido com o fundo original —", r.motivo);
@@ -329,7 +361,7 @@ export async function prepararLogoEnviado(dataUrl) {
   const tamanho = d ? `trabalho ${d.w}×${d.h}px` : "trabalho não medido";
   const caixa = d?.caixa ? `caixa ${d.pctL}%×${d.pctA}% (${d.pctArea}% da área)` : "caixa não localizada";
   const acao = r.recortado ? "cortou" : `não cortou — ${r.motivoRecorte || "recorte não avaliado"}`;
-  console.info(`Logo enviado: ${tamanho} · ${caixa} · ${acao}`);
+  console.info(`Logo enviado: ${tamanho} · ${caixa} · ${acao} · ${brilho || "brilho não medido"}`);
 
-  return r;
+  return { ...r, brilho };
 }

@@ -35,14 +35,14 @@ export default function Onboarding({ onConcluir, onIrParaDashboard, onVoltar }) 
   const [segmento, setSegmento] = useState(null);
   // cadastro acumula todos os dados do cliente
   const [cadastro, setCadastro] = useState({
-    nome: "", nomePessoa: "", whatsapp: "", tons: [], logo: null, logoSemFundo: false, criarLogoDepois: false, respostas: {},
+    nome: "", nomePessoa: "", whatsapp: "", tons: [], logo: null, logoSemFundo: false, logoBrilho: null, criarLogoDepois: false, respostas: {},
   });
 
   const ehPessoal = tipo ? !!DADOS[tipo].direto : false;
 
   function reset() {
     setTipo(null); setSegmento(null);
-    setCadastro({ nome: "", nomePessoa: "", whatsapp: "", tons: [], logo: null, logoSemFundo: false, criarLogoDepois: false, respostas: {} });
+    setCadastro({ nome: "", nomePessoa: "", whatsapp: "", tons: [], logo: null, logoSemFundo: false, logoBrilho: null, criarLogoDepois: false, respostas: {} });
     setTela("tipo");
   }
   function escolherTipo(t) {
@@ -63,6 +63,7 @@ export default function Onboarding({ onConcluir, onIrParaDashboard, onVoltar }) 
       tons: cadastro.tons,
       logo: cadastro.logo,
       logoSemFundo: cadastro.logoSemFundo,
+      logoBrilho: cadastro.logoBrilho,
       criarLogoDepois: cadastro.criarLogoDepois,
       respostas: resp,
       ...extra,
@@ -504,6 +505,7 @@ function TelaLogo({ tipoInfo, valores, onVoltar, onAvancar }) {
   const cor = tipoInfo.cor;
   const [logo, setLogo] = useState(valores.logo || null);
   const [semFundo, setSemFundo] = useState(!!valores.logoSemFundo);
+  const [brilho, setBrilho] = useState(valores.logoBrilho || null);
   const [analisando, setAnalisando] = useState(false);
   const fileRef = useRef(null);
   function escolherArquivo(e) {
@@ -517,6 +519,7 @@ function TelaLogo({ tipoInfo, valores, onVoltar, onAvancar }) {
       const r = await prepararLogoEnviado(reader.result);
       setLogo(r.url);
       setSemFundo(r.semFundo);
+      setBrilho(r.brilho);
       analisarLogoComIA(r.url).then(() => setAnalisando(false)).catch(() => setAnalisando(false));
     };
     reader.readAsDataURL(f);
@@ -566,7 +569,7 @@ function TelaLogo({ tipoInfo, valores, onVoltar, onAvancar }) {
         <input ref={fileRef} type="file" accept="image/*" onChange={escolherArquivo} style={{ display: "none" }} />
       </div>
       {logo && (
-        <BotaoPrincipal cor={cor} desabilitado={analisando} onClick={() => onAvancar({ logo, logoSemFundo: semFundo, criarLogoDepois: false })}>
+        <BotaoPrincipal cor={cor} desabilitado={analisando} onClick={() => onAvancar({ logo, logoSemFundo: semFundo, logoBrilho: brilho, criarLogoDepois: false })}>
           Continuar →
         </BotaoPrincipal>
       )}

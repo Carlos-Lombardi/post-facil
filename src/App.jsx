@@ -277,7 +277,7 @@ function ModalLembreteLogo({ onContinuar, onLogoSalvo, onCriarComIA }) {
     // Fundo removido no envio (uma vez só); se não der, segue o original.
     reader.onload = async () => {
       const r = await prepararLogoEnviado(reader.result);
-      onLogoSalvo(r.url, r.semFundo);
+      onLogoSalvo(r.url, r.semFundo, r.brilho);
     };
     reader.readAsDataURL(f);
   }
@@ -357,7 +357,7 @@ function Dashboard({ profile, onEdit, onLogoAtualizado }) {
     // Fundo removido no envio (uma vez só); se não der, segue o original.
     reader.onload = async () => {
       const r = await prepararLogoEnviado(reader.result);
-      onLogoAtualizado(r.url, r.semFundo);
+      onLogoAtualizado(r.url, r.semFundo, r.brilho);
       setShowLogoOpcoes(false);
     };
     reader.readAsDataURL(f);
@@ -380,9 +380,9 @@ function Dashboard({ profile, onEdit, onLogoAtualizado }) {
     if (tipoPendente) { setFluxoAtivo(tipoPendente); setTipoPendente(null); }
   }
 
-  function logoSalvoDoModal(dataUrl, semFundo) {
+  function logoSalvoDoModal(dataUrl, semFundo, brilho) {
     setShowLogoModal(false);
-    onLogoAtualizado(dataUrl, semFundo);
+    onLogoAtualizado(dataUrl, semFundo, brilho);
     if (tipoPendente) { setFluxoAtivo(tipoPendente); setTipoPendente(null); }
   }
 
@@ -1056,11 +1056,21 @@ function TelaCarregamento() {
 // distorção em 4:5 nem 9:16) entram por cima, nas posições fixas do desenho.
 // As medidas em cqi acompanham a LARGURA do card (o container precisa de
 // containerType: "inline-size").
-function OverlayNegocio({ cor, logo, logoSemFundo, destaque, sub }) {
+function OverlayNegocio({ cor, logo, logoBrilho, destaque, sub }) {
   const L = NEGOCIO;
   const linhas = quebrarEmLinhas(destaque);
   const gid = "pfgrad-neg";
   const cta = String(sub || "").trim();
+
+  // Contorno que descola o logo do fundo: drop-shadow segue o canal alfa, então
+  // acompanha o desenho em vez de desenhar um retângulo. Sem deslocamento (0 0)
+  // para cercar o logo por inteiro, em duas camadas — uma fechada, que marca a
+  // silhueta, e uma aberta, que espalha de leve. Logo escuro sumia na faixa
+  // escura da marca e ganha halo BRANCO; logo claro ganha sombra PRETA. Logo
+  // antigo (sem a marcação) cai no halo branco, o lado seguro do problema.
+  const contornoLogo = logoBrilho === "claro"
+    ? "drop-shadow(0 0 0.3cqi rgba(0,0,0,.55)) drop-shadow(0 0 1.1cqi rgba(0,0,0,.40))"
+    : "drop-shadow(0 0 0.3cqi rgba(255,255,255,.95)) drop-shadow(0 0 1.1cqi rgba(255,255,255,.70))";
 
   // Área do logo: quadrado de 222/1080 = 20,56% da largura (222×222 no viewBox
   // 1080×1350). Caixa transparente — o logo é desenhado direto sobre a imagem.
@@ -1112,11 +1122,10 @@ function OverlayNegocio({ cor, logo, logoSemFundo, destaque, sub }) {
         {logo
           ? <img src={logo} alt="logo" style={{
               width: "100%", height: "100%", objectFit: "contain",
-              // Sombra esfumaçada só no logo SEM fundo: drop-shadow segue o
-              // canal alfa e contorna o desenho do logo. Num logo que ainda
-              // tem o quadrado de fundo (fallback da remoção) ela contornaria
-              // esse quadrado e viraria um retângulo, então nesse caso não entra.
-              filter: logoSemFundo ? "drop-shadow(0 0.25cqi 0.5cqi rgba(0,0,0,.38))" : "none",
+              // Vale para TODO logo, inclusive o que manteve o fundo original:
+              // ali o contorno cerca o quadrado do fundo, que é justamente o
+              // que separa esse quadrado da imagem do post.
+              filter: contornoLogo,
             }} />
           : <span style={{ color: "#fff", fontWeight: 700, fontSize: "3.15cqi", letterSpacing: "0.15em",
                            textShadow: "0 0.2cqi 0.5cqi rgba(0,0,0,.55)" }}>LOGO</span>}
@@ -1353,7 +1362,7 @@ function TelaResultado({ tipo, profile, campos, formato, resultado, onNovaVersao
               ? <video src={midia.url} style={{ position: "absolute", inset: 0, width: "100%", height: "100%", objectFit: "cover" }} muted playsInline />
               : <img src={midia.url} alt="" style={{ position: "absolute", inset: 0, width: "100%", height: "100%", objectFit: "cover" }} />)}
             {usarOverlay ? (
-              <OverlayNegocio cor={corDeLayout(profile)} logo={profile.logo} logoSemFundo={profile.logoSemFundo} destaque={r.destaque} sub={r.sub} />
+              <OverlayNegocio cor={corDeLayout(profile)} logo={profile.logo} logoBrilho={profile.logoBrilho} destaque={r.destaque} sub={r.sub} />
             ) : (
               <>
                 <div style={textoBox}>
@@ -1498,6 +1507,7 @@ function EditarPerfil({ profile, onSalvar, onVoltar }) {
   const [tons,     setTons]     = useState(profile.tons || []);
   const [logo,     setLogo]     = useState(profile.logo || null);
   const [logoSemFundo, setLogoSemFundo] = useState(!!profile.logoSemFundo);
+  const [logoBrilho, setLogoBrilho] = useState(profile.logoBrilho || null);
   const [corMarca, setCorMarca] = useState(profile.corMarca || "");
   const [segmento, setSegmento] = useState({ id: profile.segmentoId, nome: profile.segmentoNome });
   const [respostas, setRespostas] = useState(profile.respostas || {});
@@ -1547,6 +1557,7 @@ function EditarPerfil({ profile, onSalvar, onVoltar }) {
       const r = await prepararLogoEnviado(reader.result);
       setLogo(r.url);
       setLogoSemFundo(r.semFundo);
+      setLogoBrilho(r.brilho);
       // Sugere a cor da marca detectada do novo logo (o cliente pode ajustar).
       // Roda sobre o logo já sem fundo: o branco virou transparência e é
       // descartado pelo filtro de alfa que cor.js já aplica.
@@ -1595,6 +1606,7 @@ function EditarPerfil({ profile, onSalvar, onVoltar }) {
       tons,
       logo,
       logoSemFundo: logo ? logoSemFundo : false,
+      logoBrilho: logo ? logoBrilho : null,
       criarLogoDepois: !logo,
       corMarca: corMarca || null,
       corMarcaLayout: corLayout,
@@ -1937,12 +1949,14 @@ export default function App() {
   }
 
   // O logo já chega com o fundo removido de quem chamou (ver logo.js);
-  // semFundo diz se a remoção deu certo, e é o que libera a sombra no post.
-  async function atualizarLogo(novoLogo, semFundo = false) {
+  // semFundo diz se a remoção deu certo, e brilho ("claro"/"escuro") é o que
+  // escolhe o contorno do logo no post.
+  async function atualizarLogo(novoLogo, semFundo = false, brilho = null) {
     // Logo novo → recalcula a cor da marca a partir dele.
     const cores = novoLogo ? await analisarCorDoLogo(novoLogo) : null;
     const fichaAtualizada = {
-      ...profile, logo: novoLogo, logoSemFundo: !!novoLogo && semFundo, criarLogoDepois: false,
+      ...profile, logo: novoLogo, logoSemFundo: !!novoLogo && semFundo,
+      logoBrilho: novoLogo ? brilho : null, criarLogoDepois: false,
       ...(cores ? { corMarca: cores.original, corMarcaLayout: cores.layout } : {}),
     };
     salvarFicha(fichaAtualizada);
