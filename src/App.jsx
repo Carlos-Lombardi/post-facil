@@ -1076,32 +1076,211 @@ function ModalFeedStories({ onEscolher, onFechar }) {
 }
 
 // ---- Tela de carregamento (Seção 4.1) — SEM "IA" ----
-const MSGS_CARREGANDO = [
-  "Estamos criando o seu post...",
-  "Preparando algo especial pro seu negócio...",
-  "Cuidando de cada detalhe pra você...",
-  "Montando seu post com a cara da sua marca...",
-  "Deixando tudo pronto pra você postar...",
+// Segue tela-espera-post-facil.html: as frases entram uma por vez, de cima
+// para baixo; a da vez cresce, fica azul e um brilho corre por cima dela;
+// depois de PASSO_ESPERA volta ao normal e ganha o check.
+// A animação NUNCA segura o resultado: quem manda é o FluxoGeracao — assim
+// que a geração termina ele troca de etapa e esta tela é desmontada no meio
+// da sequência. A frase final ("Gerando seu post completo...") é o estado de
+// espera para quando a geração demora mais que a sequência inteira.
+const PASSO_ESPERA = 2500; // 2,5s por frase
+
+// Cada frase pode ser só texto ou [texto, complemento em cinza menor].
+const BLOCOS_ESPERA = [
+  {
+    titulo: "ANALISANDO...",
+    cor: "azul",
+    frases: [
+      "Dados do seu negócio",
+      "Histórico de Posts",
+      "Informações exclusivas",
+      ["Identidade visual", " (a sua cara)"],
+    ],
+  },
+  {
+    titulo: "CRIANDO POR VOCÊ:...",
+    cor: "verde",
+    frases: [
+      "Tema do Post de hoje",
+      "Criativos do Post",
+      "Descrevendo a Imagem",
+      "Legenda inteligente",
+      ["# Hashtags", " (Post será visto)"],
+      ["Turbinando o algoritmo", " (mais alcance)"],
+    ],
+  },
 ];
+
+// Lista achatada: cada frase guarda a que bloco pertence, para o título do
+// bloco aparecer junto da primeira frase dele.
+const LINHAS_ESPERA = BLOCOS_ESPERA.flatMap((b, bi) =>
+  b.frases.map((f) => ({
+    texto: Array.isArray(f) ? f[0] : f,
+    par: Array.isArray(f) ? f[1] : "",
+    cor: b.cor,
+    bloco: bi,
+  }))
+);
+
 function TelaCarregamento() {
-  const [i, setI] = useState(0);
+  // passo = índice da frase ativa. Ao chegar em LINHAS_ESPERA.length todas
+  // estão marcadas e a frase final entra girando.
+  const [passo, setPasso] = useState(0);
   useEffect(() => {
-    const t = setInterval(() => setI((x) => (x + 1) % MSGS_CARREGANDO.length), 1600);
+    const t = setInterval(() => {
+      setPasso((p) => {
+        if (p >= LINHAS_ESPERA.length) {
+          clearInterval(t);
+          return p;
+        }
+        return p + 1;
+      });
+    }, PASSO_ESPERA);
     return () => clearInterval(t);
   }, []);
+
+  const fim = passo >= LINHAS_ESPERA.length;
+
   return (
-    <div style={{ minHeight: "100vh", background: "#F0F5FB", fontFamily: GEN_FONT, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", padding: 24 }}>
+    <div className="pf-esp-tela" style={{ fontFamily: GEN_FONT }}>
       <style>{`
-        @keyframes pfLoadFloat { 0%,100%{transform:translateY(0);} 50%{transform:translateY(-14px);} }
-        @keyframes pfLoadGlow { 0%,100%{filter:drop-shadow(0 8px 10px rgba(150,205,255,.35));} 50%{filter:drop-shadow(0 16px 26px rgba(150,205,255,.75));} }
+        .pf-esp-tela{
+          height:100vh; height:100dvh; width:100%;
+          background:#FFFFFF; overflow:hidden;
+          display:flex; flex-direction:column; align-items:center;
+          padding:clamp(6px,1.6vh,18px) 12px clamp(8px,2vh,22px);
+        }
+        /* o logo fica centralizado; só os blocos e a frase final vão à direita */
+        .pf-esp-conteudo{ width:100%; max-width:430px; padding-left:clamp(8px,4vw,40px); }
+
+        /* logo original do app (mesmo PNG e mesmo efeito de sombra da vitrine
+           da Home), aqui sobre fundo branco: a sombra é um borrão separado,
+           que acompanha o sobe-e-desce do logo. */
+        .pf-esp-logo{
+          position:relative;
+          width:clamp(96px,26vw,128px); height:clamp(96px,26vw,128px);
+          margin:clamp(2px,1vh,14px) 0 clamp(14px,3.4vh,34px);
+          flex:0 0 auto;
+        }
+        .pf-esp-marca{
+          position:absolute; left:0; top:0; width:100%; height:100%;
+          object-fit:contain; display:block; z-index:2;
+          filter:drop-shadow(0 12px 16px rgba(0,8,40,.22));
+          animation:pfEspFlutua 3.6s ease-in-out infinite;
+        }
+        @keyframes pfEspFlutua{ 0%,100%{transform:translateY(0)} 50%{transform:translateY(-12px)} }
+        .pf-esp-sombra{
+          position:absolute; left:50%; bottom:-14px;
+          width:72%; height:18px; border-radius:12px;
+          transform:translateX(-50%);
+          background:rgba(0,45,122,.30); filter:blur(11px); z-index:1;
+          animation:pfEspSombra 3.6s ease-in-out infinite;
+        }
+        @keyframes pfEspSombra{
+          0%,100%{width:72%;opacity:.85}
+          50%{width:82%;opacity:.55}
+        }
+
+        .pf-esp-bloco{ width:100%; margin-bottom:clamp(8px,2.2vh,26px); }
+        .pf-esp-titulo{
+          font-size:19px; font-weight:800; color:#243642; letter-spacing:.3px;
+          margin-bottom:clamp(4px,1.2vh,14px);
+          opacity:0; transform:translateY(6px);
+        }
+        .pf-esp-titulo.on{ animation:pfEspEntra .5s ease forwards; }
+
+        /* camada de fora: entrada. camada de dentro: crescimento.
+           separadas porque a animação com fill forwards venceria o transform
+           da classe e o crescimento nunca aconteceria. */
+        .pf-esp-linha{ padding:clamp(2px,.7vh,9px) 0; opacity:0; transform:translateX(-10px); }
+        .pf-esp-linha.on{ animation:pfEspEntra .45s ease forwards; }
+        .pf-esp-int{
+          display:flex; align-items:center; gap:12px;
+          font-size:17px; color:#243642;
+          transform-origin:left center; transition:transform .35s ease, color .35s ease;
+        }
+        .pf-esp-linha.ativa .pf-esp-int{ transform:scale(1.22); font-weight:700; color:#003BA0; }
+        .pf-esp-linha.ativa .pf-esp-par{ color:#003BA0; opacity:.75; }
+        .pf-esp-par{ color:#8A9AA6; font-size:14px; font-weight:400; }
+
+        .pf-esp-check{
+          width:26px; height:26px; border-radius:7px; flex:0 0 auto; box-sizing:border-box;
+          display:flex; align-items:center; justify-content:center;
+          border:2px solid #cdd9e5; background:#fff;
+          color:#fff; font-size:15px; font-weight:800;
+          transition:all .25s ease;
+        }
+        .pf-esp-check.feito{ animation:pfEspPop .4s ease; }
+        .pf-esp-check.feito.azul{ background:#8FB7F0; border-color:#8FB7F0; }
+        .pf-esp-check.feito.verde{ background:#2FA84F; border-color:#2FA84F; }
+        @keyframes pfEspPop{ 0%{transform:scale(.5)} 60%{transform:scale(1.25)} 100%{transform:scale(1)} }
+
+        /* brilho correndo por cima da frase ativa */
+        .pf-esp-texto{ position:relative; overflow:hidden; }
+        .pf-esp-linha.ativa .pf-esp-texto::after{
+          content:""; position:absolute; top:0; left:-60%; width:50%; height:100%;
+          background:linear-gradient(90deg,transparent,rgba(255,255,255,.85),transparent);
+          animation:pfEspBrilho 1.2s ease-in-out infinite;
+        }
+        @keyframes pfEspBrilho{ from{left:-60%} to{left:120%} }
+        @keyframes pfEspEntra{ to{opacity:1;transform:none} }
+
+        .pf-esp-final{
+          width:100%; margin-top:clamp(2px,1vh,8px);
+          font-size:19px; font-weight:800; color:#243642;
+          opacity:0; animation:pfEspEntra .5s ease forwards;
+          display:flex; align-items:center; justify-content:center; gap:11px;
+        }
+        .pf-esp-spin{
+          width:20px; height:20px; flex:0 0 auto; box-sizing:border-box;
+          border:3px solid #cdd9e5; border-top-color:#003BA0; border-radius:50%;
+          animation:pfEspGira .8s linear infinite;
+        }
+        @keyframes pfEspGira{ to{transform:rotate(360deg)} }
+        .pf-esp-final-txt{ animation:pfEspPulsa 1.6s ease-in-out .5s infinite; }
+        @keyframes pfEspPulsa{ 0%,100%{opacity:1} 50%{opacity:.55} }
+
+        /* telas baixas: aperta os espaços, nunca o tamanho das frases */
+        @media (max-height:680px){
+          .pf-esp-linha{ padding:2px 0; }
+          .pf-esp-bloco{ margin-bottom:8px; }
+        }
       `}</style>
-      <div style={{ animation: "pfLoadFloat 3.6s ease-in-out infinite" }}>
-        <div style={{ animation: "pfLoadGlow 2.4s ease-in-out infinite" }}>
-          <PostFacilLogo size={120} />
-        </div>
+
+      <div className="pf-esp-logo">
+        <div className="pf-esp-sombra" />
+        <img className="pf-esp-marca" src={logoPostFacil} alt="Post Fácil" />
       </div>
-      <div style={{ marginTop: 36, color: "#003BA0", fontWeight: 800, fontSize: 17, textAlign: "center", maxWidth: 300, minHeight: 48 }}>
-        {MSGS_CARREGANDO[i]}
+
+      <div className="pf-esp-conteudo">
+        {BLOCOS_ESPERA.map((b, bi) => {
+          const primeira = LINHAS_ESPERA.findIndex((l) => l.bloco === bi);
+          return (
+            <div className="pf-esp-bloco" key={bi}>
+              <div className={"pf-esp-titulo" + (passo >= primeira ? " on" : "")}>{b.titulo}</div>
+              {LINHAS_ESPERA.map((l, i) =>
+                l.bloco !== bi ? null : (
+                  <div key={i} className={"pf-esp-linha" + (passo >= i ? " on" : "") + (passo === i ? " ativa" : "")}>
+                    <div className="pf-esp-int">
+                      <span className={"pf-esp-check " + l.cor + (passo > i ? " feito" : "")}>{passo > i ? "✓" : ""}</span>
+                      <span className="pf-esp-texto">
+                        {l.texto}
+                        {l.par && <span className="pf-esp-par">{l.par}</span>}
+                      </span>
+                    </div>
+                  </div>
+                )
+              )}
+            </div>
+          );
+        })}
+
+        {fim && (
+          <div className="pf-esp-final">
+            <span className="pf-esp-spin" />
+            <span className="pf-esp-final-txt">Gerando seu post completo...</span>
+          </div>
+        )}
       </div>
     </div>
   );
