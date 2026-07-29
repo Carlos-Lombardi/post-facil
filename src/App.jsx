@@ -1328,9 +1328,12 @@ function OverlayNegocio({ cor, logo, logoBrilho, destaque, sub }) {
   // silhueta, e uma aberta, que espalha de leve. Logo escuro sumia na faixa
   // escura da marca e ganha halo BRANCO; logo claro ganha sombra PRETA. Logo
   // antigo (sem a marcação) cai no halo branco, o lado seguro do problema.
+  // O halo BRANCO estava forte demais e foi reduzido 25% (alfas x0,75:
+  // .95 -> .71 e .70 -> .53). Os raios de desfoque não mudaram — quem controla
+  // a força é o alfa; mexer no raio mudaria o tamanho do halo, não a força.
   const contornoLogo = logoBrilho === "claro"
     ? "drop-shadow(0 0 0.3cqi rgba(0,0,0,.55)) drop-shadow(0 0 1.1cqi rgba(0,0,0,.40))"
-    : "drop-shadow(0 0 0.3cqi rgba(255,255,255,.95)) drop-shadow(0 0 1.1cqi rgba(255,255,255,.70))";
+    : "drop-shadow(0 0 0.3cqi rgba(255,255,255,.71)) drop-shadow(0 0 1.1cqi rgba(255,255,255,.53))";
 
   // Área do logo: quadrado de 222/1080 = 20,56% da largura (222×222 no viewBox
   // 1080×1350). Caixa transparente — o logo é desenhado direto sobre a imagem.
