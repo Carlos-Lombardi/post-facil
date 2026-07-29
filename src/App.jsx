@@ -1144,22 +1144,27 @@ function TelaCarregamento() {
   return (
     <div className="pf-esp-tela" style={{ fontFamily: GEN_FONT }}>
       <style>{`
+        /* position:fixed em vez de 100dvh: o app não tem reset de CSS, então o
+           body fica com a margem padrão de 8px do navegador — com altura de
+           tela cheia o documento passava 16px do viewport e dava pra rolar.
+           Ancorado no viewport, a tela é exatamente a tela e o logo cai no
+           centro horizontal de verdade. */
         .pf-esp-tela{
-          height:100vh; height:100dvh; width:100%;
+          position:fixed; inset:0;
           background:#FFFFFF; overflow:hidden;
           display:flex; flex-direction:column; align-items:center;
-          padding:clamp(6px,1.6vh,18px) 12px clamp(8px,2vh,22px);
+          padding:clamp(4px,1.4vh,18px) 10px clamp(6px,1.8vh,22px);
         }
         /* o logo fica centralizado; só os blocos e a frase final vão à direita */
-        .pf-esp-conteudo{ width:100%; max-width:430px; padding-left:clamp(8px,4vw,40px); }
+        .pf-esp-conteudo{ width:100%; max-width:430px; padding-left:clamp(24px,9vw,56px); padding-right:4px; }
 
         /* logo original do app (mesmo PNG e mesmo efeito de sombra da vitrine
            da Home), aqui sobre fundo branco: a sombra é um borrão separado,
            que acompanha o sobe-e-desce do logo. */
         .pf-esp-logo{
           position:relative;
-          width:clamp(96px,26vw,128px); height:clamp(96px,26vw,128px);
-          margin:clamp(2px,1vh,14px) 0 clamp(14px,3.4vh,34px);
+          width:clamp(84px,24vw,124px); height:clamp(84px,24vw,124px);
+          margin:clamp(0px,.6vh,12px) 0 clamp(12px,3vh,32px);
           flex:0 0 auto;
         }
         .pf-esp-marca{
@@ -1168,10 +1173,16 @@ function TelaCarregamento() {
           filter:drop-shadow(0 12px 16px rgba(0,8,40,.22));
           animation:pfEspFlutua 3.6s ease-in-out infinite;
         }
-        @keyframes pfEspFlutua{ 0%,100%{transform:translateY(0)} 50%{transform:translateY(-12px)} }
+        /* o desenho dentro do PNG está 1% da largura à direita do centro do
+           arquivo (sobra 38px à esquerda e 30px à direita no canvas 400x400);
+           o -1% aqui devolve o logo ao centro óptico da tela. */
+        @keyframes pfEspFlutua{
+          0%,100%{transform:translate(-1%,0)}
+          50%{transform:translate(-1%,-12px)}
+        }
         .pf-esp-sombra{
-          position:absolute; left:50%; bottom:-14px;
-          width:72%; height:18px; border-radius:12px;
+          position:absolute; left:calc(50% - 1%); bottom:-12px;
+          width:72%; height:16px; border-radius:12px;
           transform:translateX(-50%);
           background:rgba(0,45,122,.30); filter:blur(11px); z-index:1;
           animation:pfEspSombra 3.6s ease-in-out infinite;
@@ -1181,10 +1192,10 @@ function TelaCarregamento() {
           50%{width:82%;opacity:.55}
         }
 
-        .pf-esp-bloco{ width:100%; margin-bottom:clamp(8px,2.2vh,26px); }
+        .pf-esp-bloco{ width:100%; margin-bottom:clamp(6px,2vh,26px); }
         .pf-esp-titulo{
           font-size:19px; font-weight:800; color:#243642; letter-spacing:.3px;
-          margin-bottom:clamp(4px,1.2vh,14px);
+          margin-bottom:clamp(3px,1vh,14px);
           opacity:0; transform:translateY(6px);
         }
         .pf-esp-titulo.on{ animation:pfEspEntra .5s ease forwards; }
@@ -1192,16 +1203,22 @@ function TelaCarregamento() {
         /* camada de fora: entrada. camada de dentro: crescimento.
            separadas porque a animação com fill forwards venceria o transform
            da classe e o crescimento nunca aconteceria. */
-        .pf-esp-linha{ padding:clamp(2px,.7vh,9px) 0; opacity:0; transform:translateX(-10px); }
+        .pf-esp-linha{ padding:clamp(1px,.6vh,9px) 0; opacity:0; transform:translateX(-10px); }
         .pf-esp-linha.on{ animation:pfEspEntra .45s ease forwards; }
+        /* max-width 78%: o crescimento é transform, que NÃO entra no cálculo de
+           largura — sem esse teto o texto era diagramado em 100% e depois
+           esticado para fora da tela. 78% x 1,22 = 95%, então a frase é
+           quebrada já pensando no tamanho grande e o parêntese desce sozinho
+           para a linha de baixo só quando não cabe. */
         .pf-esp-int{
           display:flex; align-items:center; gap:12px;
-          font-size:17px; color:#243642;
+          font-size:17px; color:#243642; max-width:78%;
           transform-origin:left center; transition:transform .35s ease, color .35s ease;
         }
         .pf-esp-linha.ativa .pf-esp-int{ transform:scale(1.22); font-weight:700; color:#003BA0; }
         .pf-esp-linha.ativa .pf-esp-par{ color:#003BA0; opacity:.75; }
-        .pf-esp-par{ color:#8A9AA6; font-size:14px; font-weight:400; }
+        /* nowrap: se o parêntese descer, desce inteiro — nunca parte no meio */
+        .pf-esp-par{ color:#8A9AA6; font-size:14px; font-weight:400; display:inline-block; white-space:nowrap; }
 
         .pf-esp-check{
           width:26px; height:26px; border-radius:7px; flex:0 0 auto; box-sizing:border-box;
@@ -1226,7 +1243,7 @@ function TelaCarregamento() {
         @keyframes pfEspEntra{ to{opacity:1;transform:none} }
 
         .pf-esp-final{
-          width:100%; margin-top:clamp(2px,1vh,8px);
+          width:100%; margin-top:clamp(1px,.8vh,8px);
           font-size:19px; font-weight:800; color:#243642;
           opacity:0; animation:pfEspEntra .5s ease forwards;
           display:flex; align-items:center; justify-content:center; gap:11px;
@@ -1240,10 +1257,17 @@ function TelaCarregamento() {
         .pf-esp-final-txt{ animation:pfEspPulsa 1.6s ease-in-out .5s infinite; }
         @keyframes pfEspPulsa{ 0%,100%{opacity:1} 50%{opacity:.55} }
 
-        /* telas baixas: aperta os espaços, nunca o tamanho das frases */
-        @media (max-height:680px){
-          .pf-esp-linha{ padding:2px 0; }
-          .pf-esp-bloco{ margin-bottom:8px; }
+        /* telas baixas: aperta os espaços primeiro — o tamanho das frases e o
+           crescimento nunca mudam. Só abaixo de 600px de altura o logo cede. */
+        @media (max-height:700px){
+          .pf-esp-linha{ padding:1px 0; }
+          .pf-esp-bloco{ margin-bottom:6px; }
+          .pf-esp-titulo{ margin-bottom:3px; }
+          .pf-esp-logo{ margin-bottom:10px; }
+        }
+        @media (max-height:600px){
+          .pf-esp-logo{ width:74px; height:74px; margin:0 0 8px; }
+          .pf-esp-linha{ padding:0; }
         }
       `}</style>
 
