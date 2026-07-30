@@ -165,6 +165,38 @@ export function podeGerarPost(profile) {
   return getPostCreditos(profile).monthCount < POST_LIMITE_MES;
 }
 
+// Estado do saldo MENSAL para o contador visível ao cliente. O número mostrado
+// desconta de POST_MES_CONHECIDO (90), não do teto real (92): os 2 extras são
+// cortesia e continuam sendo surpresa. Math.max evita número negativo em quem
+// já está usando a cortesia.
+export function creditosMes(profile) {
+  const { dayCount, monthCount } = getPostCreditos(profile);
+  return {
+    monthCount,
+    dayCount,
+    conhecido: POST_MES_CONHECIDO,
+    restantes: Math.max(0, POST_MES_CONHECIDO - monthCount),
+    // usou tudo, inclusive a cortesia: aqui a geração trava de verdade
+    esgotado: monthCount >= POST_LIMITE_MES,
+    // passou dos 90 mas ainda tem os 2 de cortesia
+    naCortesia: monthCount >= POST_MES_CONHECIDO && monthCount < POST_LIMITE_MES,
+    renovaEm: diasParaRenovar(),
+  };
+}
+
+// Zera os créditos de post DESTE cliente apagando a chave. Existe para o modo
+// ?dev desbloquear testes no celular — o localStorage do aparelho não é
+// acessível de fora. Nenhuma tela de cliente chama isto.
+export function zerarPostCreditos(profile) {
+  try {
+    localStorage.removeItem(chaveCliente(profile, "pf_posts_"));
+    return true;
+  } catch (e) {
+    console.error("Falha ao zerar créditos de post:", e);
+    return false;
+  }
+}
+
 // ============================================================
 // SAUDAÇÃO MOTIVACIONAL (Seção 2)
 // Cumprimenta pelo primeiro nome, frase que varia a cada abertura,

@@ -12,6 +12,7 @@ import {
   PostFacilLogo, AppHeader, Toast, useToast, QuotaBar,
   ADMIN_PASS, DEFAULT_CODES, getDefaultLimits, getOverrides,
   saudacaoMotivacional, incPostCreditos, mensagemCreditos, podeGerarPost,
+  creditosMes, zerarPostCreditos,
   getWppConfig, saveWppConfig, doCopy, chaveCliente,
 } from "./shared.jsx";
 import logoPostFacil from "./assets/logo-postfacil.png";
@@ -328,6 +329,87 @@ function Landing({ onStart, onLogoClick }) {
 // Aparece por sessão até o cliente enviar/criar o logo.
 // Exceção: segmento "pessoal" nunca mostra este modal.
 // ============================================================
+// SALDO MENSAL DE POSTS — CONTADOR VISÍVEL E AVISO DE LIMITE
+// O cliente perdia a referência do mês: só existia a contagem do dia, numa
+// linha pequena na tela de resultado. Aqui o saldo do mês fica à vista e o
+// número CAI a cada post (o cartão lê o localStorage a cada render, e
+// incPostCreditos roda antes de a tela de resultado aparecer).
+// Aparece na Home (antes de escolher) e na tela de resultado (onde o número
+// cai à vista). Ver creditosMes/zerarPostCreditos em shared.jsx.
+// ============================================================
+function CartaoCreditosMes({ profile }) {
+  const c = creditosMes(profile);
+  // A barra mostra o que RESTA, não o que foi gasto: assim ela esvazia junto
+  // com o número, em vez de crescer enquanto o número cai.
+  const pct = Math.round((c.restantes / c.conhecido) * 100);
+
+  // Três estados, do mais grave ao normal. O esgotado é o que o cliente
+  // precisa entender sem esforço — antes era uma linha cinza de 12px.
+  const tema = c.esgotado
+    ? { fundo: "#FEF2F2", borda: "#FCA5A5", titulo: "#B91C1C", barra: "#DC2626" }
+    : c.naCortesia
+      ? { fundo: "#FFFBEB", borda: "#FCD34D", titulo: "#92400E", barra: "#F59E0B" }
+      : { fundo: "#FFFFFF", borda: "#DCE7F5", titulo: "#003BA0", barra: "#003BA0" };
+
+  return (
+    <div style={{ background: tema.fundo, border: `1.5px solid ${tema.borda}`, borderRadius: 18, padding: "16px 18px", boxShadow: "0 4px 16px rgba(0,59,160,0.07)", fontFamily: "Nunito,sans-serif" }}>
+      {c.esgotado ? (
+        <>
+          <div style={{ fontSize: 34, textAlign: "center" }}>🗓️</div>
+          <div style={{ color: tema.titulo, fontWeight: 900, fontSize: 19, textAlign: "center", lineHeight: 1.3, marginTop: 6 }}>
+            Seus posts do mês acabaram!
+          </div>
+          <div style={{ color: "#16323F", fontWeight: 800, fontSize: 15, textAlign: "center", marginTop: 8, lineHeight: 1.45 }}>
+            Renovam automaticamente em <span style={{ color: tema.titulo }}>{c.renovaEm}</span>.
+          </div>
+          <div style={{ color: "#5C7686", fontWeight: 700, fontSize: 13, textAlign: "center", marginTop: 8, lineHeight: 1.5 }}>
+            Você aproveitou todos os {c.conhecido} posts do mês, mais os 2 de cortesia. Já já a gente se vê por aqui! 😊
+          </div>
+        </>
+      ) : (
+        <>
+          <div style={{ display: "flex", alignItems: "baseline", justifyContent: "center", gap: 7 }}>
+            <span style={{ color: tema.titulo, fontWeight: 900, fontSize: 34, lineHeight: 1 }}>{c.restantes}</span>
+            <span style={{ color: "#16323F", fontWeight: 800, fontSize: 15 }}>de {c.conhecido} posts neste mês</span>
+          </div>
+          <div style={{ height: 9, borderRadius: 6, background: "#E8EEF7", marginTop: 12, overflow: "hidden" }}>
+            <div style={{ width: pct + "%", height: "100%", background: tema.barra, borderRadius: 6, transition: "width .4s ease" }} />
+          </div>
+          <div style={{ color: c.naCortesia ? tema.titulo : "#5C7686", fontWeight: 700, fontSize: 13, textAlign: "center", marginTop: 10, lineHeight: 1.5 }}>
+            {mensagemCreditos(profile)}
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
+// Aviso de tela cheia ao tocar em gerar sem saldo no mês. Antes o clique não
+// fazia NADA (return mudo em novaVersao) e parecia defeito do app.
+function ModalLimiteMes({ profile, onFechar }) {
+  const c = creditosMes(profile);
+  return (
+    <div style={{ position: "fixed", inset: 0, background: "rgba(22,50,63,0.55)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1000, padding: 20 }}>
+      <div style={{ background: "white", borderRadius: 24, padding: "32px 24px", maxWidth: 400, width: "100%", textAlign: "center", boxShadow: "0 16px 48px rgba(0,59,160,0.18)", fontFamily: "Nunito,sans-serif" }}>
+        <div style={{ fontSize: 48, marginBottom: 14 }}>🗓️</div>
+        <div style={{ fontWeight: 900, fontSize: 21, marginBottom: 12, color: "#B91C1C", lineHeight: 1.3 }}>
+          Seus posts do mês acabaram!
+        </div>
+        <div style={{ fontSize: 16, color: "#16323F", fontWeight: 800, lineHeight: 1.5, marginBottom: 10 }}>
+          Eles renovam automaticamente em {c.renovaEm}.
+        </div>
+        <div style={{ fontSize: 14, color: "#5C7686", lineHeight: 1.6, marginBottom: 24 }}>
+          Você usou todos os {c.conhecido} posts deste mês, e ainda os 2 de cortesia que liberamos pra você. Nada foi perdido: no dia da renovação seu saldo volta cheio. 💙
+        </div>
+        <button onClick={onFechar} style={{ width: "100%", padding: 15, background: "#003BA0", color: "white", border: "none", borderRadius: 14, fontSize: 16, fontWeight: 800, cursor: "pointer", fontFamily: "Nunito,sans-serif" }}>
+          Entendi
+        </button>
+      </div>
+    </div>
+  );
+}
+
+// ============================================================
 function ModalLembreteLogo({ onContinuar, onLogoSalvo, onCriarComIA }) {
   const [view, setView] = useState("lembrete");
   const fileRef = useRef(null);
@@ -408,6 +490,9 @@ function Dashboard({ profile, onEdit, onLogoAtualizado }) {
   const [showLogoOpcoes, setShowLogoOpcoes] = useState(false);
   const logoFileRef = useRef(null);
   const [toast, showToast] = useToast();
+  const [limiteMes, setLimiteMes] = useState(false);
+  // remonta o cartão do saldo depois de zerar no modo ?dev
+  const [saldoV, setSaldoV] = useState(0);
 
   // saudação motivacional (varia a cada abertura; usa o nome da pessoa)
   const [saud] = useState(() => saudacaoMotivacional(profile.nomePessoa));
@@ -425,8 +510,11 @@ function Dashboard({ profile, onEdit, onLogoAtualizado }) {
     reader.readAsDataURL(f);
   }
 
-  // clique num dos 3 botões → (lembrete de logo, se preciso) → inicia o fluxo
+  // clique num dos 3 botões → (limite do mês) → (lembrete de logo) → fluxo
   function tentarGerarPost(tipo) {
+    // A Home ignorava o teto de 92 por completo: dava para furar o limite
+    // saindo e entrando no fluxo, e o cliente nunca via o aviso aqui.
+    if (!podeGerarPost(profile)) { setLimiteMes(true); return; }
     const dismissido = sessionStorage.getItem("pf_logo_dismissed") === "1";
     if (semLogo && !ehPessoal && !dismissido) {
       setTipoPendente(tipo);
@@ -508,6 +596,25 @@ function Dashboard({ profile, onEdit, onLogoAtualizado }) {
 
         {prem && <div style={{ padding: "0 20px" }}><QuotaBar profile={profile} /></div>}
 
+        {/* saldo do MÊS — o cliente vê antes de escolher o post */}
+        <div style={{ padding: "16px 20px 0" }}>
+          <CartaoCreditosMes key={saldoV} profile={profile} />
+          {/* só com ?dev=bastidores: desbloqueia teste no celular, já que o
+              localStorage do aparelho não é acessível de fora */}
+          {DEV_ON && (
+            <div
+              onClick={() => {
+                zerarPostCreditos(profile);
+                setSaldoV((v) => v + 1);
+                showToast("🛠️ Contador do mês zerado");
+              }}
+              style={{ marginTop: 10, textAlign: "center", color: "#64748b", fontSize: 12, fontWeight: 800, cursor: "pointer", border: "1px dashed #94a3b8", borderRadius: 10, padding: "8px 10px" }}
+            >
+              🛠️ zerar contador do mês (modo dev)
+            </div>
+          )}
+        </div>
+
         {/* 4. OS 3 BOTÕES DE CRIAR POST (texto de apoio ABAIXO de cada botão) */}
         <div style={{ padding: "40px 20px 26px" }}>
           {BOTOES_POST.map((b) => (
@@ -576,6 +683,8 @@ function Dashboard({ profile, onEdit, onLogoAtualizado }) {
         </div>
       )}
 
+      {limiteMes && <ModalLimiteMes profile={profile} onFechar={() => setLimiteMes(false)} />}
+
       {toast && <Toast msg={toast} />}
     </div>
   );
@@ -595,6 +704,7 @@ function FluxoGeracao({ tipo, profile, onSair }) {
   const [campos, setCampos] = useState({});
   const [formato, setFormato] = useState(null);
   const [resultado, setResultado] = useState(null);
+  const [limiteMes, setLimiteMes] = useState(false);
 
   function gerar(fmt) {
     const usar = fmt || formato;
@@ -633,7 +743,8 @@ function FluxoGeracao({ tipo, profile, onSair }) {
   }
 
   function novaVersao() {
-    if (!podeGerarPost(profile)) return; // após os 92 do mês, aguardar recarga
+    // Antes era um return mudo: o clique não fazia nada e parecia defeito.
+    if (!podeGerarPost(profile)) { setLimiteMes(true); return; }
     gerar(formato);
   }
 
@@ -644,7 +755,12 @@ function FluxoGeracao({ tipo, profile, onSair }) {
   if (etapa === "loading")
     return <TelaCarregamento />;
   if (etapa === "resultado")
-    return <TelaResultado tipo={tipo} profile={profile} campos={campos} formato={formato} resultado={resultado} onNovaVersao={novaVersao} onSair={onSair} />;
+    return (
+      <>
+        <TelaResultado tipo={tipo} profile={profile} campos={campos} formato={formato} resultado={resultado} onNovaVersao={novaVersao} onSair={onSair} />
+        {limiteMes && <ModalLimiteMes profile={profile} onFechar={() => setLimiteMes(false)} />}
+      </>
+    );
   // etapa "modal"
   return (
     <div style={{ minHeight: "100vh", background: "#EEF1FA", fontFamily: GEN_FONT, display: "flex", justifyContent: "center" }}>
@@ -1715,10 +1831,12 @@ function TelaResultado({ tipo, profile, campos, formato, resultado, onNovaVersao
           <button onClick={baixar} style={{ padding: 15, borderRadius: 14, fontWeight: 800, fontSize: 13, border: "none", cursor: "pointer", background: "#003BA0", color: "#fff", boxShadow: "0 3px 10px rgba(0,59,160,.25)", fontFamily: GEN_FONT }}>⬇️ Baixar imagem</button>
         </div>
 
-        {/* gerar outra versão + contador */}
+        {/* gerar outra versão + saldo do mês (é aqui que o número cai à vista) */}
         <div style={{ textAlign: "center", margin: "28px 20px 0" }}>
           <span onClick={onNovaVersao} style={{ color: "#003BA0", fontWeight: 800, fontSize: 15, cursor: "pointer" }}>🔄 Gerar outra versão</span>
-          <span style={{ display: "block", marginTop: 8, color: "#5C7686", fontSize: 12, fontWeight: 600, lineHeight: 1.5, padding: "0 6px" }}>{mensagemCreditos(profile)}</span>
+        </div>
+        <div style={{ margin: "16px 20px 0" }}>
+          <CartaoCreditosMes profile={profile} />
         </div>
 
         {/* card do WhatsApp */}
