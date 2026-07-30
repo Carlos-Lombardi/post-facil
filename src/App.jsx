@@ -218,6 +218,19 @@ function registrarPostNegocio(profile, resumo) {
   }
 }
 
+// ---- Tipo de cena da vez: ciclo de 2 com pessoas : 1 só com o produto ----
+// A vez é DERIVADA dos últimos registros em vez de guardada num contador
+// próprio: assim nada dessincroniza se o histórico for cortado (slice de
+// HIST_NEG_MAX sempre mantém os 2 últimos). Registro antigo sem cenaTipo conta
+// como "pessoas", que é a verdade — até hoje toda imagem saía com pessoas.
+const CICLO_COM_PESSOAS = 2;
+function proximoTipoCena(hist) {
+  const ultimos = hist.slice(-CICLO_COM_PESSOAS);
+  if (ultimos.length < CICLO_COM_PESSOAS) return "pessoas";
+  const todasComPessoas = ultimos.every((h) => (h.cenaTipo || "pessoas") === "pessoas");
+  return todasComPessoas ? "produto" : "pessoas";
+}
+
 // Etiqueta curta da cena que vai para o histórico. Usa o resumo_cena que a
 // nossa IA devolve (rótulo de até 8 palavras); se vier vazio ou faltando, cai
 // nas 12 primeiras palavras da descricao_fundo — reserva para o histórico
@@ -237,7 +250,8 @@ function blocoHistoricoParaTexto(hist) {
     // h.resumoCena é o campo ANTIGO (guardava a descricao_fundo inteira):
     // lido como reserva para os históricos já salvos no navegador do cliente
     // não virarem "-" até saírem da janela. Itens novos usam h.cena.
-    `${i + 1}. Cena: ${h.cena || h.resumoCena || "-"} | Tema do texto: ${h.temaTexto || "-"}`
+    `${i + 1}. Cena: ${h.cena || h.resumoCena || "-"} | Tipo: ${(h.cenaTipo || "pessoas") === "produto" ? "só o produto" : "com pessoas"}`
+    + ` | Tema do texto: ${h.temaTexto || "-"}`
     + ` | Tom: ${h.tom || "-"} | Cor: ${h.corDestaque || "-"}`
   ).join("\n");
   return [
@@ -734,6 +748,10 @@ async function gerarPostNegocioReal(profile) {
   // chamar a nossa IA para orientá-la a criar algo diferente.
   const hist = lerHistoricoNegocio(profile);
 
+  // Vez desta geração no ciclo 2 com pessoas : 1 só produto. É só o PEDIDO —
+  // a diretriz E deixa o tema do post sobrepor a vez quando não combinar.
+  const tipoCena = proximoTipoCena(hist);
+
   // Espelho de leitura para o painel de desenvolvedor. Fora do modo ?dev
   // fica null e nenhuma linha abaixo faz nada. Nada aqui altera a geração.
   const dbg = DEV_ON ? novoDebugNegocio() : null;
@@ -745,7 +763,7 @@ async function gerarPostNegocioReal(profile) {
     "Responda SEMPRE em português do Brasil e APENAS com um JSON válido, sem texto antes ou depois, sem cercas de código. O JSON tem exatamente estas chaves:",
     '- "legenda": legenda do post para o Instagram, calorosa e profissional, coerente com o texto_imagem.',
     '- "texto_imagem": texto CURTO (poucas palavras, cabe em até 2 linhas) que será aplicado por cima da imagem.',
-    '- "descricao_fundo": descrição do cenário para a IA de imagem, em UMA ÚNICA FRASE CORRIDA de NO MÁXIMO 100 PALAVRAS (não use listas, tópicos nem várias frases). A descrição deve COMEÇAR pelo enquadramento. É PROIBIDO usar as palavras "fechado", "close", "close-up" ou "plano médio fechado". Em cenas COM PESSOAS, o enquadramento deve ser "plano americano" ou "plano aberto" (nunca "plano médio", que é da cintura para cima e deixa a cabeça alta demais), com a pessoa afastada da câmera e espaço vazio acima da cabeça; "plano médio" só é permitido em cenas SEM PESSOAS. SEM texto/letras/palavras na cena. Descreva uma FOTOGRAFIA REAL (não ilustração/desenho/3D), de preferência com pessoas reais, com astral positivo e acolhedor, e faça a cena ALUDIR ao texto_imagem (imagem e texto conversam). Em cenas SEM PESSOAS, o assunto principal fica CENTRALIZADO (no miolo da imagem). Em cenas COM PESSOAS, é PROIBIDO escrever que o produto, o objeto ou as mãos ficam "centralizados", "no meio" ou "no centro da imagem": quem ocupa a faixa central é o ROSTO, e o produto aparece logo ABAIXO do rosto, na altura do peito ou do balcão — a frase precisa dizer isso de forma explícita. O topo e a base ficam calmos, com fundo neutro e desfocado. Uso interno.',
+    '- "descricao_fundo": descrição do cenário para a IA de imagem, em UMA ÚNICA FRASE CORRIDA de NO MÁXIMO 100 PALAVRAS (não use listas, tópicos nem várias frases). A descrição deve COMEÇAR pelo enquadramento. É PROIBIDO usar as palavras "fechado", "close", "close-up" ou "plano médio fechado". Em cenas COM PESSOAS, o enquadramento deve ser "plano americano" ou "plano aberto" (nunca "plano médio", que é da cintura para cima e deixa a cabeça alta demais), com a pessoa afastada da câmera e espaço vazio acima da cabeça; "plano médio" só é permitido em cenas SEM PESSOAS. SEM texto/letras/palavras na cena. Descreva uma FOTOGRAFIA REAL (não ilustração/desenho/3D), COM ou SEM pessoas conforme o TIPO DE CENA pedido nesta geração, com astral positivo e acolhedor, e faça a cena ALUDIR ao texto_imagem (imagem e texto conversam). Em cenas SEM PESSOAS, o assunto principal fica CENTRALIZADO (no miolo da imagem). Em cenas COM PESSOAS, é PROIBIDO escrever que o produto, o objeto ou as mãos ficam "centralizados", "no meio" ou "no centro da imagem": quem ocupa a faixa central é o ROSTO, e o produto aparece logo ABAIXO do rosto, na altura do peito ou do balcão — a frase precisa dizer isso de forma explícita. O topo e a base ficam calmos, com fundo neutro e desfocado. Uso interno.',
     '- "resumo_cena": etiqueta CURTA de NO MÁXIMO 8 PALAVRAS que identifica o TIPO de cena da descricao_fundo, para servir de memória entre posts. É um RÓTULO, não uma descrição: sem enquadramento, sem luz, sem adjetivos de estilo. Exemplos: "cliente escolhendo capinha em expositor giratório", "técnico consertando notebook na bancada", "entrega de pacote na porta". Uso interno.',
     '- "cta": chamada para ação curta.',
     '- "hashtags": array de 4 a 6 hashtags do segmento (sem espaços dentro de cada uma).',
@@ -754,7 +772,9 @@ async function gerarPostNegocioReal(profile) {
     "A. A imagem recebe uma camada gráfica por cima: uma faixa colorida e um texto grande cobrem os 20% do topo e os 20% da base. Por isso a descricao_fundo DEVE manter o assunto principal inteiramente no miolo (60% centrais) e descrever o topo e a base como áreas calmas — fundo neutro, desfocado, sem elementos importantes.",
     "B. Tom profissional que impressione: use na descricao_fundo termos como iluminação profissional, composição cuidada, aparência premium, foco nítido, cores harmoniosas.",
     "C. VARIE A CENA a cada post: mude cenário, ângulo, enquadramento e composição na descricao_fundo. Evite repetir o mesmo clichê (ex.: não caia sempre em \"xícara sobre balcão de madeira\"). Mantenha sempre a fidelidade ao segmento e à identidade do negócio.",
-    "D. ESTILO REALISTA POR PADRÃO: a descricao_fundo descreve uma FOTO REAL, com pessoas reais quando fizer sentido, nunca ilustração/desenho/3D. EXCEÇÃO guiada pelo tema: assuntos infantis ou lúdicos/festivos/fantasiosos (festa de criança, brinquedos, produtos de bebê, doces infantis) PODEM pedir ilustração/desenho quando combinar melhor com o post — é exceção, não regra geral.",
+    "D. ESTILO REALISTA POR PADRÃO: a descricao_fundo descreve uma FOTO REAL, nunca ilustração/desenho/3D. EXCEÇÃO guiada pelo tema: assuntos infantis ou lúdicos/festivos/fantasiosos (festa de criança, brinquedos, produtos de bebê, doces infantis) PODEM pedir ilustração/desenho quando combinar melhor com o post — é exceção, não regra geral.",
+    "E. TIPO DE CENA (com pessoas ou só o produto): cada geração recebe o tipo da vez, num ciclo de DUAS cenas com pessoas para UMA só com o produto — é assim que o feed do cliente varia. Siga o tipo pedido, MAS O TEMA MANDA MAIS: se o tema do post claramente pede uma pessoa (atendimento, acolhimento, equipe, cuidado, conversa, antes e depois), use pessoas mesmo sendo a vez do produto; e se o tema claramente não combina com pessoa, deixe a cena só com o produto mesmo sendo a vez das pessoas. O objetivo é variar sem forçar o que não combina.",
+    "F. CENAS SÓ COM O PRODUTO: sem pessoa na cena o produto é o PROTAGONISTA, então a exigência de realismo é MAIOR, não menor — descreva FOTOGRAFIA REAL de alta qualidade, com textura e material visíveis, foco nítido e acabamento premium, nunca com aparência de ilustração, desenho ou render 3D (a exceção da diretriz D continua valendo SÓ para temas infantis/lúdicos). O produto fica CENTRALIZADO no miolo da imagem. EMBALAGENS: este app não usa marcas reais, então NÃO centre a cena em embalagem fechada com rótulo — mostre o PRODUTO EM SI, à mostra (os biscoitos fora do pacote, o pão na tábua, o doce no prato). Embalagem pode aparecer de vez em quando, discreta e nunca como foco, e SEM rótulo, marca, nome ou qualquer texto inventado — a cena continua sem letras.",
     "",
     "REGRAS: NUNCA invente produtos/serviços que o cliente não informou. A descricao_fundo é interna e nunca é mostrada ao cliente. Ao se referir à IA nos textos ao cliente, diga \"nossa IA\".",
   ].join("\n");
@@ -775,6 +795,11 @@ async function gerarPostNegocioReal(profile) {
     "Respostas do onboarding do cliente:",
     qa || "(sem respostas registradas)",
     blocoHist,
+    "",
+    tipoCena === "produto"
+      ? "TIPO DE CENA DESTA GERAÇÃO (vez do ciclo 2 com pessoas : 1 só produto): SÓ O PRODUTO, sem pessoas na cena — produto realista e centralizado, à mostra, sem embalagem com rótulo (diretrizes E e F)."
+      : "TIPO DE CENA DESTA GERAÇÃO (vez do ciclo 2 com pessoas : 1 só produto): COM PESSOAS na cena (diretriz E).",
+    "Se o tema do post claramente não combinar com esse tipo, o tema manda — a diretriz E autoriza trocar.",
     "",
     "Lembre-se: mantenha o assunto centralizado no miolo, deixe o topo e a base calmos, e varie a cena a cada post. Responda só com o JSON.",
   ]
@@ -808,7 +833,7 @@ async function gerarPostNegocioReal(profile) {
   // feita no Claude; aqui a lista serve só para o painel de desenvolvedor.
   const historicoCenas = hist.map((h) => h.cena || h.resumoCena).filter(Boolean);
   const { imagem, promptImagem, msImagem } =
-    await gerarImagemLimpaNegocio(j);
+    await gerarImagemLimpaNegocio(j, tipoCena);
 
   if (dbg) {
     dbg.promptImagem = promptImagem;
@@ -824,6 +849,9 @@ async function gerarPostNegocioReal(profile) {
   marcarPasso("montagem final");
   registrarPostNegocio(profile, {
     cena: cenaParaHistorico(j),
+    // O que foi PEDIDO nesta vez. É o que faz o ciclo 2:1 andar. Se a diretriz E
+    // tiver deixado o tema sobrepor a vez, o registro não reflete o que saiu.
+    cenaTipo: tipoCena,
     temaTexto: [(j.texto_imagem || "").trim(), (j.cta || "").trim()].filter(Boolean).join(" · "),
     tom: tons,
     corDestaque: corDeLayout(profile),
@@ -850,7 +878,10 @@ async function gerarPostNegocioReal(profile) {
 // a IA de imagem estiver desligada (a tela usa o placeholder demo), resumoCena
 // alimenta o histórico anti-repetição do cliente, e promptImagem/msImagem
 // existem só para o painel de desenvolvedor ler (quem gera o post os ignora).
-async function gerarImagemLimpaNegocio(j) {
+// tipoCena ("pessoas" | "produto") é a vez do ciclo 2:1 decidida por
+// proximoTipoCena. Tem valor padrão para nenhuma chamada existente mudar de
+// comportamento: sem o parâmetro, segue o de sempre (cena com pessoas).
+async function gerarImagemLimpaNegocio(j, tipoCena = "pessoas") {
   const fundo = (j.descricao_fundo || "").trim();
 
   // A IA de imagem é "sem memória" e converge para a mesma cena a cada chamada.
@@ -883,6 +914,14 @@ async function gerarImagemLimpaNegocio(j) {
 
   const temaMensagem = (j.texto_imagem || "").trim();
 
+  // Estilo conforme a vez do ciclo. A versão de produto é escrita de forma
+  // POSITIVA ("a cena mostra apenas o produto e o ambiente") em vez de "sem
+  // pessoas": o gerador de imagem não entende negação — descrever o que não se
+  // quer faz ele produzir justamente aquilo.
+  const estilo = tipoCena === "produto"
+    ? "ESTILO OBRIGATÓRIO: FOTOGRAFIA REAL de produto (foto de verdade), de alta qualidade. A cena mostra APENAS o produto e o ambiente ao redor dele, com astral positivo e acolhedor. O produto é o protagonista, centralizado no miolo: textura e material visíveis, foco nítido, acabamento premium, luz de fotografia profissional de produto. NÃO use ilustração, desenho, arte digital, 3D ou render — sem pessoa na cena, o produto é o que o cliente olha e não pode parecer desenhado. EXCEÇÃO: só quando o tema for infantil ou lúdico/festivo/fantasioso (festa de criança, brinquedos, produtos de bebê, doces infantis) a imagem PODE ser ilustração ou desenho. EMBALAGEM: mostre o PRODUTO EM SI, à mostra e exposto (os biscoitos fora do pacote, o pão na tábua, o doce no prato). Se aparecer alguma embalagem, ela é discreta e lisa, sem rótulo, sem marca, sem nome e sem nenhum texto."
+    : "ESTILO OBRIGATÓRIO: fotografia REAL (foto de verdade), com pessoas reais na cena, com astral positivo e acolhedor. NÃO use ilustração, desenho, arte digital, 3D ou render. EXCEÇÃO: quando o tema for infantil ou lúdico/festivo/fantasioso (festa de criança, brinquedos, produtos de bebê, doces infantis), a imagem PODE ser ilustração ou desenho se combinar melhor com o universo do post — é uma exceção guiada pelo tema, não uma liberação geral; fora desses casos, mantenha a foto realista.";
+
   marcarPasso("montagem do prompt da imagem");
   const prompt = [
     // Regra de composição em PRIMEIRO lugar, antes da cena: o gerador segue
@@ -890,8 +929,9 @@ async function gerarImagemLimpaNegocio(j) {
     // por cima) e usa linguagem de fotografia em vez de porcentagens.
     "COMPOSIÇÃO (regra mais importante, vale acima de qualquer outra parte desta descrição): enquadre em PLANO ABERTO ou PLANO MÉDIO, NUNCA em close-up. Câmera afastada, com espaço vazio generoso acima da cabeça: se houver pessoas, o topo da cabeça começa por volta de um terço da altura da imagem, e o rosto inteiro — do topo da cabeça ao queixo — fica no miolo, folgado. O terço de cima e a faixa de baixo da imagem mostram APENAS ambiente: teto, parede, céu, prateleira desfocada, balcão, chão, fundo neutro e desfocado — sem rostos, sem cabeças, sem o produto principal, sem detalhe fino nem contraste forte. MOTIVO: sobre a faixa de cima será aplicada uma faixa escura com a frase do post, e sobre a faixa de baixo o logo da marca e a chamada para ação; qualquer rosto ou elemento importante nessas áreas será coberto e o post fica perdido. A imagem é limpa: SEM TEXTO, SEM LETRAS, SEM PALAVRAS, sem números e sem logotipos.",
     fundo,
-    // Estilo: fotografia REAL por padrão; ilustração só como exceção guiada pelo tema.
-    "ESTILO OBRIGATÓRIO: fotografia REAL (foto de verdade), de preferência com pessoas reais, com astral positivo e acolhedor. NÃO use ilustração, desenho, arte digital, 3D ou render. EXCEÇÃO: quando o tema for infantil ou lúdico/festivo/fantasioso (festa de criança, brinquedos, produtos de bebê, doces infantis), a imagem PODE ser ilustração ou desenho se combinar melhor com o universo do post — é uma exceção guiada pelo tema, não uma liberação geral; fora desses casos, mantenha a foto realista.",
+    // Estilo: fotografia REAL sempre; a cena é com pessoas ou só com o produto
+    // conforme a vez do ciclo. Ilustração só como exceção guiada pelo tema.
+    estilo,
     // A cena deve conversar com a mensagem que entra por cima (imagem e texto aludem-se).
     temaMensagem
       ? `A cena deve ALUDIR à mensagem que será aplicada por cima: "${temaMensagem}". Imagem e texto conversam — sem escrever esse texto nem qualquer palavra na cena.`
