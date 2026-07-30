@@ -335,8 +335,9 @@ function Landing({ onStart, onLogoClick }) {
 // linha pequena na tela de resultado. Aqui o saldo do mês fica à vista e o
 // número CAI a cada post (o cartão lê o localStorage a cada render, e
 // incPostCreditos roda antes de a tela de resultado aparecer).
-// Aparece na Home (antes de escolher) e na tela de resultado (onde o número
-// cai à vista). Ver creditosMes/zerarPostCreditos em shared.jsx.
+// Aparece SÓ na tela de resultado: na Home ele competia com os 3 botões e
+// poluía a entrada do app. O aviso de limite na Home é o ModalLimiteMes.
+// Ver creditosMes/zerarPostCreditos em shared.jsx.
 // ============================================================
 function CartaoCreditosMes({ profile }) {
   const c = creditosMes(profile);
@@ -499,8 +500,6 @@ function Dashboard({ profile, onEdit, onLogoAtualizado }) {
   const logoFileRef = useRef(null);
   const [toast, showToast] = useToast();
   const [limiteMes, setLimiteMes] = useState(false);
-  // remonta o cartão do saldo depois de zerar no modo ?dev
-  const [saldoV, setSaldoV] = useState(0);
 
   // saudação motivacional (varia a cada abertura; usa o nome da pessoa)
   const [saud] = useState(() => saudacaoMotivacional(profile.nomePessoa));
@@ -604,37 +603,34 @@ function Dashboard({ profile, onEdit, onLogoAtualizado }) {
 
         {prem && <div style={{ padding: "0 20px" }}><QuotaBar profile={profile} /></div>}
 
-        {/* saldo do MÊS — o cliente vê antes de escolher o post */}
-        <div style={{ padding: "16px 20px 0" }}>
-          <CartaoCreditosMes key={saldoV} profile={profile} />
-          {/* só com ?dev=bastidores: desbloqueia teste no celular (o
-              localStorage do aparelho não é acessível de fora) e permite ver o
-              estado esgotado sem gastar 92 posts */}
-          {DEV_ON && (
-            <div style={{ display: "flex", gap: 8, marginTop: 10 }}>
-              <div
-                onClick={() => {
-                  zerarPostCreditos(profile);
-                  setSaldoV((v) => v + 1);
-                  showToast("🛠️ Contador do mês zerado");
-                }}
-                style={estiloBotaoDev}
-              >
-                🛠️ zerar o mês
-              </div>
-              <div
-                onClick={() => {
-                  estourarPostCreditos(profile);
-                  setSaldoV((v) => v + 1);
-                  showToast("🛠️ Contador do mês no teto (92)");
-                }}
-                style={estiloBotaoDev}
-              >
-                🛠️ estourar o mês (92)
-              </div>
+        {/* O cartão do saldo do mês saiu daqui: na Home ele poluía a tela logo
+            antes dos 3 botões. O contador agora vive SÓ na tela de resultado.
+            O teto do mês continua sendo checado neste clique (tentarGerarPost). */}
+        {/* só com ?dev=bastidores: desbloqueia teste no celular (o
+            localStorage do aparelho não é acessível de fora) e permite ver o
+            estado esgotado sem gastar 92 posts */}
+        {DEV_ON && (
+          <div style={{ display: "flex", gap: 8, padding: "16px 20px 0" }}>
+            <div
+              onClick={() => {
+                zerarPostCreditos(profile);
+                showToast("🛠️ Contador do mês zerado");
+              }}
+              style={estiloBotaoDev}
+            >
+              🛠️ zerar o mês
             </div>
-          )}
-        </div>
+            <div
+              onClick={() => {
+                estourarPostCreditos(profile);
+                showToast("🛠️ Contador do mês no teto (92)");
+              }}
+              style={estiloBotaoDev}
+            >
+              🛠️ estourar o mês (92)
+            </div>
+          </div>
+        )}
 
         {/* 4. OS 3 BOTÕES DE CRIAR POST (texto de apoio ABAIXO de cada botão) */}
         <div style={{ padding: "40px 20px 26px" }}>
