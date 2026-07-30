@@ -86,6 +86,7 @@ function novoDebugNegocio() {
     msTexto: null,        // duração da chamada de texto
     msImagem: null,       // duração da chamada de imagem
     passo: "início",      // etapa em andamento (o painel mostra onde parou)
+    recuperacaoJSON: null,// preenchido quando o JSON veio torto e foi salvo
     erro: null,           // { mensagem, tipo, origem, passo, impacto, pilha, em }
     em: new Date(),
   };
@@ -862,13 +863,114 @@ function normalizarHashtags(hashtags) {
     .join(" ");
 }
 
-// Extrai o objeto JSON da resposta da IA, mesmo se vier com texto/cercas ```.
-function extrairJSON(texto) {
+// ============================================================
+// LEITURA DO JSON DA NOSSA IA — EM CASCATA
+// Um erro de pontuação no texto (tipicamente uma aspa dupla não escapada no
+// meio da legenda) fazia o JSON.parse lançar e o post INTEIRO cair no modo
+// demonstração — inclusive a imagem, que é gerada depois desta leitura.
+// Agora são quatro camadas, da mais barata para a mais cara. A camada 1 é
+// exatamente o comportamento antigo: quando o JSON vem válido, nada muda.
+// ============================================================
+
+// As chaves do JSON, na ordem em que a nossa IA as escreve. A extração por
+// esquema usa esta lista como delimitador: o fim de um valor é a CHAVE
+// SEGUINTE, não a aspa — é por isso que ela aguenta aspas soltas no texto.
+const CHAVES_JSON_NEGOCIO = [
+  "legenda", "texto_imagem", "descricao_fundo", "resumo_cena", "cta", "hashtags",
+];
+
+// Recorta do primeiro "{" ao último "}": tira prosa e cercas ``` em volta.
+function recortarObjeto(texto) {
   const t = String(texto || "");
   const ini = t.indexOf("{");
   const fim = t.lastIndexOf("}");
-  if (ini === -1 || fim === -1 || fim < ini) throw new Error("Resposta sem JSON.");
-  return JSON.parse(t.slice(ini, fim + 1));
+  if (ini === -1 || fim === -1 || fim < ini) return "";
+  return t.slice(ini, fim + 1);
+}
+
+// Defeitos MECÂNICOS: vírgula sobrando antes de } ou ], e caractere de controle
+// literal dentro de uma string (quebra de linha crua, tab), que em JSON precisa
+// vir escapado. Trocar controle por espaço é seguro: entre as chaves é só
+// formatação, e dentro da string era o que quebrava. Não mexe em aspas — isso
+// seria chute, e a camada seguinte resolve de forma determinística.
+function faxinarJSON(bruto) {
+  return bruto
+    .replace(/[\u0000-\u001F]/g, " ")
+    .replace(/,\s*([}\]])/g, "$1");
+}
+
+// Limpa um valor recortado: tira o "}" final (só no último campo), a vírgula
+// de separação, as aspas em volta e desfaz os escapes que a IA acertou.
+function limparValorJSON(bruto, ehLista) {
+  let v = String(bruto).trim().replace(/[\s}]+$/, "").replace(/,$/, "").trim();
+  if (ehLista) {
+    // hashtags: tira colchetes, aspas e vírgulas e devolve a linha solta —
+    // normalizarHashtags aceita string e reparte nos espaços.
+    return v.replace(/[[\]",]/g, " ").replace(/\s+/g, " ").trim();
+  }
+  if (v.startsWith('"')) v = v.slice(1);
+  if (v.endsWith('"')) v = v.slice(0, -1);
+  return v.replace(/\\"/g, '"').replace(/\\n/g, " ").replace(/\\\\/g, "\\").trim();
+}
+
+// Extração por esquema: o JSON é PLANO (nenhum objeto dentro de objeto) e as
+// chaves são conhecidas, então dá para ler campo por campo sem o JSON estar
+// válido. O valor de cada chave vai do que vem depois de `"chave":` até onde
+// começa a próxima chave PRESENTE no texto — chave ausente é pulada.
+function extrairPorEsquema(bruto) {
+  const obj = {};
+  CHAVES_JSON_NEGOCIO.forEach((chave, i) => {
+    const abre = new RegExp('"' + chave + '"\\s*:\\s*').exec(bruto);
+    if (!abre) return;
+    const inicio = abre.index + abre[0].length;
+    const resto = bruto.slice(inicio);
+    let fim = bruto.length;
+    for (let j = i + 1; j < CHAVES_JSON_NEGOCIO.length; j++) {
+      const prox = new RegExp('"' + CHAVES_JSON_NEGOCIO[j] + '"\\s*:').exec(resto);
+      if (prox) { fim = inicio + prox.index; break; }
+    }
+    obj[chave] = limparValorJSON(bruto.slice(inicio, fim), chave === "hashtags");
+  });
+  return obj;
+}
+
+// Deixa rastro de que houve recuperação: o post saiu certo, mas o JSON veio
+// torto e vale saber. Aparece no painel de dev e no console.
+function registrarRecuperacaoJSON(camada, erro) {
+  const nota = `${camada} — o JSON.parse falhou com: ${erro?.message || erro}`;
+  console.warn("JSON da nossa IA veio torto e foi recuperado por " + nota);
+  if (debugNegocio) debugNegocio.recuperacaoJSON = nota;
+}
+
+// Extrai o objeto JSON da resposta da IA, mesmo se vier com texto/cercas ```
+// ou levemente malformado. Só desiste quando falta o essencial.
+function extrairJSON(texto) {
+  const bruto = recortarObjeto(texto);
+  if (!bruto) throw new Error("Resposta sem JSON.");
+
+  // 1. Caminho normal — JSON válido.
+  try {
+    return JSON.parse(bruto);
+  } catch (erroOriginal) {
+    // 2. Faxina dos defeitos mecânicos e nova tentativa.
+    try {
+      const j = JSON.parse(faxinarJSON(bruto));
+      registrarRecuperacaoJSON("faxina", erroOriginal);
+      return j;
+    } catch {
+      // 3. Extração por esquema — resolve aspa não escapada no meio do texto.
+      const j = extrairPorEsquema(bruto);
+      if ((j.legenda || "").trim() && (j.texto_imagem || "").trim()) {
+        registrarRecuperacaoJSON("extração por esquema", erroOriginal);
+        return j;
+      }
+      // 4. Sem legenda ou sem texto da imagem não há post: aí sim, demo.
+      throw new Error(
+        "JSON inválido e irrecuperável (nem a extração por esquema achou legenda e texto_imagem). " +
+        "Erro original: " + (erroOriginal?.message || erroOriginal)
+      );
+    }
+  }
 }
 
 async function gerarPostNegocioReal(profile) {
@@ -903,6 +1005,12 @@ async function gerarPostNegocioReal(profile) {
     '- "resumo_cena": etiqueta CURTA de NO MÁXIMO 8 PALAVRAS que identifica o TIPO de cena da descricao_fundo, para servir de memória entre posts. É um RÓTULO, não uma descrição: sem enquadramento, sem luz, sem adjetivos de estilo. Exemplos: "cliente escolhendo capinha em expositor giratório", "técnico consertando notebook na bancada", "entrega de pacote na porta". Uso interno.',
     '- "cta": chamada para ação curta.',
     '- "hashtags": array de 4 a 6 hashtags do segmento (sem espaços dentro de cada uma).',
+    "",
+    "REGRAS DE PONTUAÇÃO DO JSON (a resposta é lida por máquina; um erro aqui perde o post inteiro):",
+    '- NUNCA use aspas duplas (") dentro dos textos. Para destacar uma palavra ou frase, use aspas simples (\'assim\') ou não use nada. Esta regra é mais importante do que escapar: NÃO ESCREVA a aspa dupla, em vez de tentar escapá-la.',
+    "- NUNCA quebre linha dentro de um valor: cada texto é uma linha só, do início ao fim.",
+    "- Separe as chaves com vírgula, e não ponha vírgula depois da última.",
+    "- Sem cercas de código, sem comentários e sem nenhum texto antes ou depois do JSON.",
     "",
     "DIRETRIZES OBRIGATÓRIAS:",
     "A. A imagem recebe uma camada gráfica por cima: uma faixa colorida e um texto grande cobrem os 20% do topo e os 20% da base. Por isso a descricao_fundo DEVE manter o assunto principal inteiramente no miolo (60% centrais) e descrever o topo e a base como áreas calmas — fundo neutro, desfocado, sem elementos importantes.",
@@ -1701,6 +1809,9 @@ function PainelDev() {
 
   const corEHistorico = [
     "Cor da marca usada no layout: " + (d.corMarca || "—"),
+    "",
+    // Quando aparece, o post saiu certo MAS o JSON veio torto e foi recuperado.
+    "Recuperação do JSON: " + (d.recuperacaoJSON || "não foi preciso (JSON veio válido)"),
     "",
     "Bloco do histórico anti-repetição enviado ao Claude:",
     d.historicoTexto || "(nenhum — primeiro post deste cliente)",
