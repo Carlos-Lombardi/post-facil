@@ -197,6 +197,21 @@ export function zerarPostCreditos(profile) {
   }
 }
 
+// Joga o saldo do mês no teto para o modo ?dev conferir o estado "esgotado"
+// (cartão vermelho + modal) sem gastar 92 posts de verdade. Só o mês vai ao
+// teto: o contador do dia fica como está. Nenhuma tela de cliente chama isto.
+export function estourarPostCreditos(profile) {
+  try {
+    const c = getPostCreditos(profile);
+    c.monthCount = POST_LIMITE_MES;
+    localStorage.setItem(chaveCliente(profile, "pf_posts_"), JSON.stringify(c));
+    return true;
+  } catch (e) {
+    console.error("Falha ao estourar créditos de post:", e);
+    return false;
+  }
+}
+
 // ============================================================
 // SAUDAÇÃO MOTIVACIONAL (Seção 2)
 // Cumprimenta pelo primeiro nome, frase que varia a cada abertura,

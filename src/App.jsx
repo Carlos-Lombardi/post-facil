@@ -12,7 +12,7 @@ import {
   PostFacilLogo, AppHeader, Toast, useToast, QuotaBar,
   ADMIN_PASS, DEFAULT_CODES, getDefaultLimits, getOverrides,
   saudacaoMotivacional, incPostCreditos, mensagemCreditos, podeGerarPost,
-  creditosMes, zerarPostCreditos,
+  creditosMes, zerarPostCreditos, estourarPostCreditos,
   getWppConfig, saveWppConfig, doCopy, chaveCliente,
 } from "./shared.jsx";
 import logoPostFacil from "./assets/logo-postfacil.png";
@@ -384,6 +384,13 @@ function CartaoCreditosMes({ profile }) {
   );
 }
 
+// Estilo dos atalhos do modo ?dev na Home (zerar / estourar o saldo do mês).
+// Tracejado e cinza de propósito: não é interface de cliente.
+const estiloBotaoDev = {
+  flex: 1, textAlign: "center", color: "#64748b", fontSize: 12, fontWeight: 800,
+  cursor: "pointer", border: "1px dashed #94a3b8", borderRadius: 10, padding: "8px 6px",
+};
+
 // Aviso de tela cheia ao tocar em gerar sem saldo no mês. Antes o clique não
 // fazia NADA (return mudo em novaVersao) e parecia defeito do app.
 function ModalLimiteMes({ profile, onFechar }) {
@@ -599,18 +606,31 @@ function Dashboard({ profile, onEdit, onLogoAtualizado }) {
         {/* saldo do MÊS — o cliente vê antes de escolher o post */}
         <div style={{ padding: "16px 20px 0" }}>
           <CartaoCreditosMes key={saldoV} profile={profile} />
-          {/* só com ?dev=bastidores: desbloqueia teste no celular, já que o
-              localStorage do aparelho não é acessível de fora */}
+          {/* só com ?dev=bastidores: desbloqueia teste no celular (o
+              localStorage do aparelho não é acessível de fora) e permite ver o
+              estado esgotado sem gastar 92 posts */}
           {DEV_ON && (
-            <div
-              onClick={() => {
-                zerarPostCreditos(profile);
-                setSaldoV((v) => v + 1);
-                showToast("🛠️ Contador do mês zerado");
-              }}
-              style={{ marginTop: 10, textAlign: "center", color: "#64748b", fontSize: 12, fontWeight: 800, cursor: "pointer", border: "1px dashed #94a3b8", borderRadius: 10, padding: "8px 10px" }}
-            >
-              🛠️ zerar contador do mês (modo dev)
+            <div style={{ display: "flex", gap: 8, marginTop: 10 }}>
+              <div
+                onClick={() => {
+                  zerarPostCreditos(profile);
+                  setSaldoV((v) => v + 1);
+                  showToast("🛠️ Contador do mês zerado");
+                }}
+                style={estiloBotaoDev}
+              >
+                🛠️ zerar o mês
+              </div>
+              <div
+                onClick={() => {
+                  estourarPostCreditos(profile);
+                  setSaldoV((v) => v + 1);
+                  showToast("🛠️ Contador do mês no teto (92)");
+                }}
+                style={estiloBotaoDev}
+              >
+                🛠️ estourar o mês (92)
+              </div>
             </div>
           )}
         </div>
