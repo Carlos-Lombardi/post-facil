@@ -220,6 +220,18 @@ function registrarPostNegocio(profile, resumo) {
   }
 }
 
+// Apaga o histórico do cliente. Usado quando ele troca de CATEGORIA no Editar
+// perfil: as cenas guardadas são de outro ramo e, como o histórico entra no
+// prompt como "faça diferente disto", ele puxaria os posts novos de volta
+// para o negócio antigo.
+function limparHistoricoNegocio(profile) {
+  try {
+    localStorage.removeItem(chaveHistNegocio(profile));
+  } catch (e) {
+    console.error("Falha ao limpar histórico do post de Negócio:", e);
+  }
+}
+
 // ---- Tipo de cena da vez: ciclo de 2 com pessoas : 1 só com o produto ----
 // A vez é DERIVADA dos últimos registros em vez de guardada num contador
 // próprio: assim nada dessincroniza se o histórico for cortado (slice de
@@ -2062,11 +2074,23 @@ function getPerguntasDoSegmento(tipo, segId) {
   return [];
 }
 
+// As três categorias, na mesma ordem e com os mesmos rótulos do onboarding
+// (TelaTipo). Os textos vêm de DADOS para não existirem em dois lugares.
+const CATEGORIAS = ["comercio", "profissional", "pessoal"];
+
 function EditarPerfil({ profile, onSalvar, onVoltar }) {
   const FONT = "'Nunito', ui-rounded, 'Segoe UI', system-ui, sans-serif";
-  const tipo = profile.tipo;
-  const tipoData = DADOS[tipo] || {};
-  const temCategorias = !!tipoData.categorias;
+
+  // tipo    = a categoria já escolhida (a que vai para a ficha)
+  // tipoSel = a categoria que o cliente está NAVEGANDO na lista de segmentos.
+  //           Só vira a definitiva quando ele confirma a troca; se cancelar,
+  //           volta para tipo — o destaque nunca mente sobre o que está salvo.
+  const [tipo,    setTipo]    = useState(profile.tipo);
+  const [tipoSel, setTipoSel] = useState(profile.tipo);
+  const tipoData    = DADOS[tipo] || {};
+  const tipoSelData = DADOS[tipoSel] || {};
+  // Perfil Pessoal não tem lista: o segmento é único (DADOS.pessoal.direto).
+  const temCategorias = !!tipoSelData.categorias;
 
   const [nomePessoa, setNomePessoa] = useState(profile.nomePessoa || "");
   const [nome,     setNome]     = useState(profile.nome || "");
@@ -2078,7 +2102,7 @@ function EditarPerfil({ profile, onSalvar, onVoltar }) {
   const [corMarca, setCorMarca] = useState(profile.corMarca || "");
   const [segmento, setSegmento] = useState({ id: profile.segmentoId, nome: profile.segmentoNome });
   const [respostas, setRespostas] = useState(profile.respostas || {});
-  const [perguntas, setPerguntas] = useState(() => getPerguntasDoSegmento(tipo, profile.segmentoId));
+  const [perguntas, setPerguntas] = useState(() => getPerguntasDoSegmento(profile.tipo, profile.segmentoId));
 
   const [modalTrocarSeg, setModalTrocarSeg] = useState(false);
   const [segPendente,    setSegPendente]    = useState(null);
@@ -2090,10 +2114,12 @@ function EditarPerfil({ profile, onSalvar, onVoltar }) {
 
   const norm = (s) => s.normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase();
 
+  // Segue a categoria que está sendo navegada, não a já salva: é isso que
+  // permite sair de comércio e ver os segmentos de profissional liberal.
   const todosSegs = useMemo(() => {
-    if (!tipoData.categorias) return [];
-    return tipoData.categorias.flatMap(cat => cat.segmentos.map(s => ({ ...s, cat: cat.nome })));
-  }, [tipoData]);
+    if (!tipoSelData.categorias) return [];
+    return tipoSelData.categorias.flatMap(cat => cat.segmentos.map(s => ({ ...s, cat: cat.nome })));
+  }, [tipoSelData]);
 
   const segsFiltrados = useMemo(() => {
     const t = norm(buscaSeg.trim());
@@ -2145,20 +2171,56 @@ function EditarPerfil({ profile, onSalvar, onVoltar }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  // Toque numa das três categorias: abre os segmentos DAQUELA categoria.
+  // Perfil Pessoal não tem lista — o segmento é único, então vai direto para
+  // a confirmação.
+  function escolherCategoria(t) {
+    const dt = DADOS[t];
+    if (!dt) return;
+    setTipoSel(t);
+    if (dt.direto) {
+      if (t === tipo && dt.direto.id === segmento.id) { setMostrarLista(false); return; }
+      setSegPendente({ ...dt.direto, tipo: t });
+      setModalTrocarSeg(true);
+      setMostrarLista(false);
+      return;
+    }
+    setBuscaSeg("");
+    setMostrarLista(true);
+  }
+
   function tentarTrocarSeg(seg) {
-    if (seg.id === segmento.id) { setMostrarLista(false); return; }
-    setSegPendente(seg);
+    if (seg.id === segmento.id && tipoSel === tipo) { setMostrarLista(false); return; }
+    setSegPendente({ ...seg, tipo: tipoSel });
     setModalTrocarSeg(true);
     setMostrarLista(false);
   }
 
   function confirmarTroca() {
+    const novoTipo = segPendente.tipo || tipo;
+    const mudouCategoria = novoTipo !== tipo;
+    setTipo(novoTipo);
+    setTipoSel(novoTipo);
     setSegmento({ id: segPendente.id, nome: segPendente.nome });
-    setPerguntas(getPerguntasDoSegmento(tipo, segPendente.id));
+    setPerguntas(getPerguntasDoSegmento(novoTipo, segPendente.id));
+    // As respostas são numeradas por posição (1..10) e as perguntas do novo
+    // segmento são outras: manter as antigas pareava pergunta nova com
+    // resposta velha no prompt.
     setRespostas({});
+    // Trocar de categoria é praticamente outro negócio: as cenas guardadas do
+    // ramo anterior só puxariam os próximos posts de volta para ele.
+    if (mudouCategoria) limparHistoricoNegocio(profile);
     setModalTrocarSeg(false);
     setSegPendente(null);
-    showToast("✅ Segmento atualizado. Responda as novas perguntas.");
+    showToast(mudouCategoria
+      ? "✅ Categoria atualizada. Responda as novas perguntas."
+      : "✅ Segmento atualizado. Responda as novas perguntas.");
+  }
+
+  function cancelarTroca() {
+    setModalTrocarSeg(false);
+    setSegPendente(null);
+    setTipoSel(tipo);
   }
 
   function salvar() {
@@ -2177,11 +2239,22 @@ function EditarPerfil({ profile, onSalvar, onVoltar }) {
       criarLogoDepois: !logo,
       corMarca: corMarca || null,
       corMarcaLayout: corLayout,
+      // tipo entra explicitamente: sem ele o ...profile devolvia sempre a
+      // categoria antiga e a troca não chegava à ficha.
+      tipo,
       segmentoId: segmento.id,
       segmentoNome: segmento.nome,
       respostas,
     });
   }
+
+  // Mesmo texto do onboarding (TelaIdentificacao): o campo não é "negócio"
+  // para quem é profissional liberal ou tem página pessoal.
+  const rotuloNome = tipoData.direto
+    ? "Seu nome ou o nome da sua página"
+    : tipo === "profissional"
+    ? "Seu nome ou o nome do seu trabalho"
+    : "Nome do negócio";
 
   const inp = { width: "100%", boxSizing: "border-box", padding: "13px 14px", fontSize: 15, fontFamily: FONT, borderRadius: 12, border: "1.5px solid #E4EEF3", outline: "none", background: "white", color: "#16323F" };
   const rot = (label) => <label style={{ display: "block", fontWeight: 800, fontSize: 13.5, color: "#5C7686", marginBottom: 6 }}>{label}</label>;
@@ -2202,12 +2275,31 @@ function EditarPerfil({ profile, onSalvar, onVoltar }) {
           <input value={nomePessoa} onChange={e => setNomePessoa(e.target.value)} placeholder="Seu primeiro nome" style={inp} />
         </div>
         <div style={{ marginBottom: 14 }}>
-          {rot("Nome do negócio")}
+          {rot(rotuloNome)}
           <input value={nome} onChange={e => setNome(e.target.value)} style={inp} />
         </div>
         <div style={{ marginBottom: 14 }}>
           {rot("WhatsApp")}
           <input value={whatsapp} onChange={e => setWhatsapp(mascararZap(e.target.value))} inputMode="numeric" style={inp} />
+        </div>
+        <div style={{ marginBottom: 14 }}>
+          {rot("Categoria")}
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 8 }}>
+            {CATEGORIAS.map(t => {
+              const d = DADOS[t];
+              const ativo = t === tipoSel;
+              return (
+                <button key={t} onClick={() => escolherCategoria(t)}
+                  style={{ textAlign: "center", background: ativo ? "#E6EEF9" : "white", border: `2px solid ${ativo ? "#003BA0" : "#E4EEF3"}`, borderRadius: 14, padding: "12px 8px", cursor: "pointer", fontFamily: FONT }}>
+                  <div style={{ fontSize: 22, marginBottom: 4 }}>{d.emoji}</div>
+                  <div style={{ fontSize: 11.5, fontWeight: ativo ? 800 : 700, color: "#16323F", lineHeight: 1.25 }}>{d.rotulo}</div>
+                </button>
+              );
+            })}
+          </div>
+          <div style={{ fontSize: 12, color: "#5C7686", fontWeight: 600, marginTop: 8, lineHeight: 1.45 }}>
+            Ao trocar de categoria você escolhe um segmento novo e responde as perguntas dele.
+          </div>
         </div>
         <div style={{ marginBottom: 4 }}>
           {rot("Segmento")}
@@ -2216,14 +2308,24 @@ function EditarPerfil({ profile, onSalvar, onVoltar }) {
               {segmento.nome || "—"}
             </div>
             {temCategorias && (
-              <button onClick={() => setMostrarLista(v => !v)} style={{ padding: "13px 16px", background: "#003BA0", color: "white", border: "none", borderRadius: 12, fontSize: 13.5, fontWeight: 800, cursor: "pointer", fontFamily: FONT, whiteSpace: "nowrap" }}>
+              <button
+                onClick={() => {
+                  // Fechar a lista sem escolher volta o destaque da categoria
+                  // para a que está de fato salva.
+                  if (mostrarLista) { setMostrarLista(false); setTipoSel(tipo); }
+                  else { setBuscaSeg(""); setMostrarLista(true); }
+                }}
+                style={{ padding: "13px 16px", background: "#003BA0", color: "white", border: "none", borderRadius: 12, fontSize: 13.5, fontWeight: 800, cursor: "pointer", fontFamily: FONT, whiteSpace: "nowrap" }}>
                 {mostrarLista ? "Fechar" : "Trocar"}
               </button>
             )}
           </div>
         </div>
-        {mostrarLista && (
+        {mostrarLista && temCategorias && (
           <div style={{ background: "white", border: "1.5px solid #E4EEF3", borderRadius: 14, padding: 14, marginTop: 6, marginBottom: 8 }}>
+            <div style={{ fontSize: 12.5, fontWeight: 800, color: "#003BA0", marginBottom: 10 }}>
+              {tipoSelData.emoji} Segmentos de “{tipoSelData.rotulo}”
+            </div>
             <input value={buscaSeg} onChange={e => setBuscaSeg(e.target.value)} placeholder="Buscar segmento…" style={{ ...inp, fontSize: 14, marginBottom: 10 }} />
             <div style={{ maxHeight: 220, overflowY: "auto", display: "flex", flexDirection: "column", gap: 6 }}>
               {segsFiltrados.map(s => (
@@ -2332,14 +2434,19 @@ function EditarPerfil({ profile, onSalvar, onVoltar }) {
         <div style={{ position: "fixed", inset: 0, background: "rgba(22,50,63,0.55)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1000, padding: "20px" }}>
           <div style={{ background: "white", borderRadius: 24, padding: "32px 24px", maxWidth: 400, width: "100%", fontFamily: FONT, boxShadow: "0 16px 48px rgba(0,59,160,0.18)" }}>
             <div style={{ fontSize: 36, textAlign: "center", marginBottom: 14 }}>⚠️</div>
-            <div style={{ fontWeight: 900, fontSize: 18, color: "#16323F", marginBottom: 12, textAlign: "center" }}>Trocar de segmento?</div>
+            <div style={{ fontWeight: 900, fontSize: 18, color: "#16323F", marginBottom: 12, textAlign: "center" }}>
+              {(segPendente.tipo || tipo) !== tipo ? "Trocar de categoria?" : "Trocar de segmento?"}
+            </div>
             <div style={{ fontSize: 14, color: "#5C7686", lineHeight: 1.65, marginBottom: 24 }}>
-              Ao trocar para <b style={{ color: "#16323F" }}>{segPendente.nome}</b>, suas respostas atuais serão apagadas e você vai precisar responder as perguntas do novo segmento.
+              Ao trocar para <b style={{ color: "#16323F" }}>{segPendente.nome}</b>
+              {(segPendente.tipo || tipo) !== tipo && <> (<b style={{ color: "#16323F" }}>{DADOS[segPendente.tipo]?.rotulo}</b>)</>}
+              , suas respostas atuais serão apagadas e você vai precisar responder as perguntas do novo segmento.
+              {(segPendente.tipo || tipo) !== tipo && " O histórico de posts anteriores também é zerado, para as novas ideias não puxarem para o ramo antigo."}
             </div>
             <button onClick={confirmarTroca} style={{ width: "100%", padding: "14px", background: "#003BA0", color: "white", border: "none", borderRadius: 14, fontSize: 15, fontWeight: 800, cursor: "pointer", fontFamily: FONT, marginBottom: 10 }}>
-              Sim, trocar segmento
+              {(segPendente.tipo || tipo) !== tipo ? "Sim, trocar categoria" : "Sim, trocar segmento"}
             </button>
-            <button onClick={() => { setModalTrocarSeg(false); setSegPendente(null); }} style={{ width: "100%", padding: "13px", background: "white", color: "#5C7686", border: "1.5px solid #E4EEF3", borderRadius: 14, fontSize: 14, fontWeight: 700, cursor: "pointer", fontFamily: FONT }}>
+            <button onClick={cancelarTroca} style={{ width: "100%", padding: "13px", background: "white", color: "#5C7686", border: "1.5px solid #E4EEF3", borderRadius: 14, fontSize: 14, fontWeight: 700, cursor: "pointer", fontFamily: FONT }}>
               Cancelar
             </button>
           </div>
