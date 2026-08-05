@@ -8,6 +8,7 @@ import { DADOS } from "./dados.js";
 import { gerarTexto, gerarImagem } from "./api.js";
 import { analisarCorDoLogo, escurecerParaContraste } from "./cor.js";
 import { prepararLogoEnviado } from "./logo.js";
+import { useEnvioDeLogo } from "./RecorteLogo.jsx";
 import {
   PostFacilLogo, AppHeader, Toast, useToast, QuotaBar,
   ADMIN_PASS, DEFAULT_CODES, getDefaultLimits, getOverrides,
@@ -433,19 +434,13 @@ function ModalLimiteMes({ profile, onFechar }) {
 // ============================================================
 function ModalLembreteLogo({ onContinuar, onLogoSalvo, onCriarComIA }) {
   const [view, setView] = useState("lembrete");
-  const fileRef = useRef(null);
 
-  function processarArquivo(e) {
-    const f = e.target.files?.[0];
-    if (!f) return;
-    const reader = new FileReader();
-    // Fundo removido no envio (uma vez só); se não der, segue o original.
-    reader.onload = async () => {
-      const r = await prepararLogoEnviado(reader.result);
-      onLogoSalvo(r.url, r.semFundo, r.brilho);
-    };
-    reader.readAsDataURL(f);
-  }
+  // Todo logo enviado passa pela tela de enquadramento antes de virar logo.
+  // Fundo removido no envio (uma vez só); se não der, segue o original.
+  const envioLogo = useEnvioDeLogo(async (recortado) => {
+    const r = await prepararLogoEnviado(recortado, { jaEnquadrado: true });
+    onLogoSalvo(r.url, r.semFundo, r.brilho);
+  });
 
   return (
     <div style={{ position: "fixed", inset: 0, background: "rgba(22,50,63,0.55)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1000, padding: "20px" }}>
@@ -469,7 +464,7 @@ function ModalLembreteLogo({ onContinuar, onLogoSalvo, onCriarComIA }) {
             <div style={{ fontSize: 48, marginBottom: 16 }}>🖼️</div>
             <div style={{ fontWeight: 900, fontSize: 20, marginBottom: 10, color: "#16323F" }}>Como quer criar seu logo?</div>
             <div style={{ display: "flex", flexDirection: "column", gap: 10, marginTop: 16 }}>
-              <button onClick={() => fileRef.current?.click()} style={{ width: "100%", padding: "15px", background: "#003BA0", color: "white", border: "none", borderRadius: 14, fontSize: 15, fontWeight: 800, cursor: "pointer", fontFamily: "Nunito,sans-serif" }}>
+              <button onClick={envioLogo.abrir} style={{ width: "100%", padding: "15px", background: "#003BA0", color: "white", border: "none", borderRadius: 14, fontSize: 15, fontWeight: 800, cursor: "pointer", fontFamily: "Nunito,sans-serif" }}>
                 📤 Enviar imagem
               </button>
               <button onClick={onCriarComIA} style={{ width: "100%", padding: "15px", background: "white", color: "#003BA0", border: "2px solid #003BA0", borderRadius: 14, fontSize: 15, fontWeight: 800, cursor: "pointer", fontFamily: "Nunito,sans-serif" }}>
@@ -479,10 +474,11 @@ function ModalLembreteLogo({ onContinuar, onLogoSalvo, onCriarComIA }) {
                 ← Voltar
               </button>
             </div>
-            <input ref={fileRef} type="file" accept="image/*" onChange={processarArquivo} style={{ display: "none" }} />
+            {envioLogo.campo}
           </>
         )}
       </div>
+      {envioLogo.tela}
     </div>
   );
 }
@@ -509,25 +505,19 @@ function Dashboard({ profile, onEdit, onLogoAtualizado }) {
   const semLogo = !profile.logo;
   const ehPessoal = profile.tipo === "pessoal";
   const [showLogoOpcoes, setShowLogoOpcoes] = useState(false);
-  const logoFileRef = useRef(null);
   const [toast, showToast] = useToast();
   const [limiteMes, setLimiteMes] = useState(false);
 
   // saudação motivacional (varia a cada abertura; usa o nome da pessoa)
   const [saud] = useState(() => saudacaoMotivacional(profile.nomePessoa));
 
-  function logoEscolhido(e) {
-    const f = e.target.files?.[0];
-    if (!f) return;
-    const reader = new FileReader();
-    // Fundo removido no envio (uma vez só); se não der, segue o original.
-    reader.onload = async () => {
-      const r = await prepararLogoEnviado(reader.result);
-      onLogoAtualizado(r.url, r.semFundo, r.brilho);
-      setShowLogoOpcoes(false);
-    };
-    reader.readAsDataURL(f);
-  }
+  // Todo logo enviado passa pela tela de enquadramento antes de virar logo.
+  // Fundo removido no envio (uma vez só); se não der, segue o original.
+  const envioLogo = useEnvioDeLogo(async (recortado) => {
+    const r = await prepararLogoEnviado(recortado, { jaEnquadrado: true });
+    onLogoAtualizado(r.url, r.semFundo, r.brilho);
+    setShowLogoOpcoes(false);
+  });
 
   // clique num dos 3 botões → (limite do mês) → (lembrete de logo) → fluxo
   function tentarGerarPost(tipo) {
@@ -691,14 +681,15 @@ function Dashboard({ profile, onEdit, onLogoAtualizado }) {
         />
       )}
 
-      <input ref={logoFileRef} type="file" accept="image/*" onChange={logoEscolhido} style={{ display: "none" }} />
+      {envioLogo.campo}
+      {envioLogo.tela}
       {showLogoOpcoes && (
         <div style={{ position: "fixed", inset: 0, background: "rgba(22,50,63,0.55)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1000, padding: "20px" }}>
           <div style={{ background: "white", borderRadius: 24, padding: "28px 24px", maxWidth: 360, width: "100%", textAlign: "center", boxShadow: "0 16px 48px rgba(0,59,160,0.18)", fontFamily: "Nunito,sans-serif" }}>
             <div style={{ fontSize: 40, marginBottom: 14 }}>🖼️</div>
             <div style={{ fontWeight: 900, fontSize: 18, marginBottom: 20, color: "#16323F" }}>{profile.logo ? "Trocar logo" : "Adicionar logo"}</div>
             <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-              <button onClick={() => logoFileRef.current?.click()} style={{ width: "100%", padding: "15px", background: "#003BA0", color: "white", border: "none", borderRadius: 14, fontSize: 15, fontWeight: 800, cursor: "pointer", fontFamily: "Nunito,sans-serif" }}>
+              <button onClick={envioLogo.abrir} style={{ width: "100%", padding: "15px", background: "#003BA0", color: "white", border: "none", borderRadius: 14, fontSize: 15, fontWeight: 800, cursor: "pointer", fontFamily: "Nunito,sans-serif" }}>
                 📤 Enviar imagem
               </button>
               <button onClick={() => setShowLogoOpcoes(false)} style={{ width: "100%", padding: "15px", background: "white", color: "#003BA0", border: "2px solid #003BA0", borderRadius: 14, fontSize: 15, fontWeight: 800, cursor: "pointer", fontFamily: "Nunito,sans-serif" }}>
@@ -2110,7 +2101,6 @@ function EditarPerfil({ profile, onSalvar, onVoltar }) {
   const [buscaSeg,       setBuscaSeg]       = useState("");
 
   const [toast, showToast] = useToast();
-  const fileRef = useRef(null);
 
   const norm = (s) => s.normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase();
 
@@ -2141,24 +2131,20 @@ function EditarPerfil({ profile, onSalvar, onVoltar }) {
     });
   }
 
-  function escolherLogo(e) {
-    const f = e.target.files?.[0];
-    if (!f) return;
-    const reader = new FileReader();
-    reader.onload = async () => {
-      // Fundo removido no envio (uma vez só); se não der, segue o original.
-      const r = await prepararLogoEnviado(reader.result);
-      setLogo(r.url);
-      setLogoSemFundo(r.semFundo);
-      setLogoBrilho(r.brilho);
-      // Sugere a cor da marca detectada do novo logo (o cliente pode ajustar).
-      // Roda sobre o logo já sem fundo: o branco virou transparência e é
-      // descartado pelo filtro de alfa que cor.js já aplica.
-      const cores = await analisarCorDoLogo(r.url);
-      if (cores) setCorMarca(cores.original);
-    };
-    reader.readAsDataURL(f);
-  }
+  // Todo logo enviado passa pela tela de enquadramento antes de virar logo.
+  const envioLogo = useEnvioDeLogo(async (recortado) => {
+    // Fundo removido no envio (uma vez só); se não der, segue o original.
+    // jaEnquadrado: o recorte é o que o cliente acabou de escolher na alça.
+    const r = await prepararLogoEnviado(recortado, { jaEnquadrado: true });
+    setLogo(r.url);
+    setLogoSemFundo(r.semFundo);
+    setLogoBrilho(r.brilho);
+    // Sugere a cor da marca detectada do novo logo (o cliente pode ajustar).
+    // Roda sobre o logo já RECORTADO e sem fundo: é a peça que vai para o
+    // post, e o que ficou de fora da moldura não pode puxar a cor.
+    const cores = await analisarCorDoLogo(r.url);
+    if (cores) setCorMarca(cores.original);
+  });
 
   // Backfill: logos antigos (salvos antes deste recurso) ainda não têm cor.
   // Ao abrir a edição, detecta uma sugestão a partir do logo já existente.
@@ -2366,18 +2352,24 @@ function EditarPerfil({ profile, onSalvar, onVoltar }) {
             <img src={logo} alt="logo" style={{ width: 72, height: 72, borderRadius: 14, objectFit: "contain", border: "1.5px solid #E4EEF3", background: "white", padding: 4 }} />
             <div style={{ flex: 1 }}>
               <div style={{ fontWeight: 700, fontSize: 13.5, color: "#16323F", marginBottom: 8 }}>Logo enviado ✓</div>
-              <div style={{ display: "flex", gap: 8 }}>
-                <button onClick={() => fileRef.current?.click()} style={{ padding: "8px 14px", background: "white", border: "1.5px solid #003BA0", color: "#003BA0", borderRadius: 10, fontSize: 13, fontWeight: 700, cursor: "pointer", fontFamily: FONT }}>Trocar</button>
+              <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                <button onClick={envioLogo.abrir} style={{ padding: "8px 14px", background: "white", border: "1.5px solid #003BA0", color: "#003BA0", borderRadius: 10, fontSize: 13, fontWeight: 700, cursor: "pointer", fontFamily: FONT }}>Trocar</button>
+                {/* Ajustar recorte só aparece com o original ainda em memória
+                    (logo enviado nesta tela); o que fica salvo é o recortado. */}
+                {envioLogo.podeAjustar && (
+                  <button onClick={envioLogo.ajustar} style={{ padding: "8px 14px", background: "white", border: "1.5px solid #003BA0", color: "#003BA0", borderRadius: 10, fontSize: 13, fontWeight: 700, cursor: "pointer", fontFamily: FONT }}>Ajustar recorte</button>
+                )}
                 <button onClick={() => setLogo(null)} style={{ padding: "8px 14px", background: "white", border: "1.5px solid #E4EEF3", color: "#5C7686", borderRadius: 10, fontSize: 13, fontWeight: 700, cursor: "pointer", fontFamily: FONT }}>Remover</button>
               </div>
             </div>
           </div>
         ) : (
-          <button onClick={() => fileRef.current?.click()} style={{ width: "100%", padding: "15px", background: "#003BA0", color: "white", border: "none", borderRadius: 14, fontSize: 15, fontWeight: 800, cursor: "pointer", fontFamily: FONT }}>
+          <button onClick={envioLogo.abrir} style={{ width: "100%", padding: "15px", background: "#003BA0", color: "white", border: "none", borderRadius: 14, fontSize: 15, fontWeight: 800, cursor: "pointer", fontFamily: FONT }}>
             📤 Enviar logo
           </button>
         )}
-        <input ref={fileRef} type="file" accept="image/*" onChange={escolherLogo} style={{ display: "none" }} />
+        {envioLogo.campo}
+        {envioLogo.tela}
 
         {/* COR DA MARCA */}
         <div style={{ marginTop: 20 }}>

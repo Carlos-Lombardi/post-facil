@@ -66,6 +66,8 @@ function distancia(r1, g1, b1, r2, g2, b2) {
 
 // Carrega o data URL num canvas já reduzido. Data URLs não "sujam" o
 // canvas, então getImageData funciona sem problema de CORS.
+// Devolve também o tamanho ORIGINAL e a escala usada: a tela de recorte
+// trabalha em pixels do arquivo do cliente, não do canvas reduzido.
 function carregarNoCanvas(dataUrl) {
   return new Promise((resolve, reject) => {
     const img = new Image();
@@ -77,7 +79,7 @@ function carregarNoCanvas(dataUrl) {
       canvas.width = w; canvas.height = h;
       const ctx = canvas.getContext("2d", { willReadFrequently: true });
       ctx.drawImage(img, 0, 0, w, h);
-      resolve({ canvas, ctx, w, h });
+      resolve({ canvas, ctx, w, h, origW: img.width, origH: img.height, escala });
     };
     img.onerror = () => reject(new Error("não foi possível carregar a imagem do logo"));
     img.src = dataUrl;
@@ -147,16 +149,21 @@ function caixaDoConteudo(data, w, h, criterio, borda) {
   return { x: minX, y: minY, w: maxX - minX + 1, h: maxY - minY + 1 };
 }
 
-// Recorta o canvas justo no desenho, com uma margem de segurança (nunca colado
-// no traço). Devolve { canvas, motivo, diag }: canvas null quando não dá para
-// localizar com segurança ou quando não há ganho — aí o chamador segue com a
-// imagem inteira, porque logo com margem é melhor que logo cortado errado.
-// diag leva as medidas para o diagnóstico no console de quem enviou o logo.
-function recortarNoConteudo(canvas, ctx, w, h, criterio, borda) {
+// Mede o retângulo do recorte no canvas de trabalho: a caixa do desenho mais a
+// margem de segurança (nunca colado no traço). Devolve { retangulo, motivo,
+// diag }, com retangulo null quando não dá para localizar com segurança ou
+// quando não há ganho — aí o chamador segue com a imagem inteira, porque logo
+// com margem é melhor que logo cortado errado. diag leva as medidas para o
+// diagnóstico no console de quem enviou o logo.
+//
+// Está separado do corte porque a MESMA medida serve para duas coisas: cortar
+// direto (recortarNoConteudo) e sugerir onde a moldura da tela de ajuste
+// começa (enquadramentoSugerido).
+function medirRecorte(ctx, w, h, criterio, borda) {
   const { data } = ctx.getImageData(0, 0, w, h);
   const caixa = caixaDoConteudo(data, w, h, criterio, borda);
   const diag = { w, h, caixa, pctL: 0, pctA: 0, pctArea: 0 };
-  if (!caixa) return { canvas: null, motivo: "não encontrei o desenho dentro da imagem", diag };
+  if (!caixa) return { retangulo: null, motivo: "não encontrei o desenho dentro da imagem", diag };
 
   const area = (caixa.w * caixa.h) / (w * h);
   diag.pctL = Math.round((caixa.w / w) * 100);
@@ -164,9 +171,9 @@ function recortarNoConteudo(canvas, ctx, w, h, criterio, borda) {
   diag.pctArea = Math.round(area * 100);
 
   if (area < RECORTE_AREA_MIN)
-    return { canvas: null, motivo: "o desenho detectado é pequeno demais para ser confiável", diag };
+    return { retangulo: null, motivo: "o desenho detectado é pequeno demais para ser confiável", diag };
   if (area > RECORTE_AREA_MAX)
-    return { canvas: null, motivo: "o desenho já preenche o quadro (não há sobra real)", diag };
+    return { retangulo: null, motivo: "o desenho já preenche o quadro (não há sobra real)", diag };
 
   const respiro = Math.max(RESPIRO_MIN, Math.round(Math.max(caixa.w, caixa.h) * RESPIRO));
   const x = Math.max(0, caixa.x - respiro);
@@ -174,25 +181,105 @@ function recortarNoConteudo(canvas, ctx, w, h, criterio, borda) {
   const lw = Math.min(w, caixa.x + caixa.w + respiro) - x;
   const lh = Math.min(h, caixa.y + caixa.h + respiro) - y;
   if (lw === w && lh === h)
-    return { canvas: null, motivo: "a margem de segurança já cobre a imagem inteira", diag };
+    return { retangulo: null, motivo: "a margem de segurança já cobre a imagem inteira", diag };
+
+  return { retangulo: { x, y, w: lw, h: lh }, motivo: "", diag };
+}
+
+// Recorta o canvas justo no desenho. Devolve { canvas, motivo, diag }, com
+// canvas null quando medirRecorte desiste.
+function recortarNoConteudo(canvas, ctx, w, h, criterio, borda) {
+  const { retangulo, motivo, diag } = medirRecorte(ctx, w, h, criterio, borda);
+  if (!retangulo) return { canvas: null, motivo, diag };
 
   const corte = document.createElement("canvas");
-  corte.width = lw; corte.height = lh;
-  corte.getContext("2d").drawImage(canvas, x, y, lw, lh, 0, 0, lw, lh);
+  corte.width = retangulo.w; corte.height = retangulo.h;
+  corte.getContext("2d").drawImage(
+    canvas, retangulo.x, retangulo.y, retangulo.w, retangulo.h, 0, 0, retangulo.w, retangulo.h,
+  );
   return { canvas: corte, motivo: "", diag };
+}
+
+// ============================================================
+// SUGESTÃO DE ENQUADRAMENTO — onde a moldura da tela de ajuste começa.
+//
+// Mesma detecção do recorte automático, mas em vez de cortar devolve o
+// retângulo em pixels do ARQUIVO ORIGINAL, que é o sistema de coordenadas em
+// que a tela de recorte trabalha. É isto que faz o automático "dar o
+// enquadramento sugerido" e o cliente só corrigir quando ele erra.
+//
+// SEMPRE resolve com um retângulo utilizável:
+//   { x, y, w, h, automatico }
+// automatico=false significa "não soube localizar o desenho" — aí o retângulo
+// é a imagem inteira e o cliente enquadra do zero (o caso do panfleto e da foto
+// de cartão de visita, onde é justamente ele que sabe o que é o logo).
+// Devolve null só quando nem carregar a imagem deu certo.
+// ============================================================
+export async function enquadramentoSugerido(dataUrl) {
+  if (!dataUrl) return null;
+  try {
+    const { ctx, w, h, origW, origH, escala } = await carregarNoCanvas(dataUrl);
+    const inteira = { x: 0, y: 0, w: origW, h: origH, automatico: false };
+
+    const { data } = ctx.getImageData(0, 0, w, h);
+    let transparentes = 0;
+    for (let i = 3; i < data.length; i += 4) if (data[i] < 10) transparentes++;
+
+    // Mesmo critério de removerFundoLogo: o alfa localiza o desenho quando o
+    // PNG já veio transparente; senão só dá para localizar por cor, e apenas se
+    // o fundo for sólido. Em foto/degradê não há palpite honesto a dar.
+    let criterio = null, borda = null;
+    if (transparentes / (w * h) > 0.01) {
+      criterio = "alfa";
+    } else {
+      borda = analisarBorda(data, w, h);
+      if (borda.dispersao <= DISPERSAO_MAX) criterio = "cor";
+    }
+    if (!criterio) return inteira;
+
+    const { retangulo } = medirRecorte(ctx, w, h, criterio, borda);
+    if (!retangulo) return inteira;
+
+    // De volta ao tamanho do arquivo do cliente, com folga de arredondamento
+    // aparada para a moldura nunca nascer um pixel fora da imagem.
+    const f = 1 / (escala || 1);
+    const x = Math.max(0, Math.round(retangulo.x * f));
+    const y = Math.max(0, Math.round(retangulo.y * f));
+    return {
+      x, y,
+      w: Math.min(origW - x, Math.round(retangulo.w * f)),
+      h: Math.min(origH - y, Math.round(retangulo.h * f)),
+      automatico: true,
+    };
+  } catch (e) {
+    console.error("Falha ao sugerir o enquadramento do logo:", e);
+    return null;
+  }
 }
 
 // Remove o fundo do logo e o enquadra no desenho. SEMPRE resolve — nunca lança:
 //   { url, semFundo, motivo, recortado, motivoRecorte }
 // semFundo e recortado são independentes: há logo recortado que mantém o fundo.
 // Em qualquer desistência dos dois, url é o dataUrl original.
-export async function removerFundoLogo(dataUrl) {
+//
+// jaEnquadrado: o logo já passou pela tela de recorte manual. Aí o
+// enquadramento automático NÃO roda — ele cortaria por cima do que o cliente
+// escolheu e desfaria, por exemplo, a folga que ele deixou de propósito. A
+// remoção de fundo continua normal: são decisões independentes.
+export async function removerFundoLogo(dataUrl, { jaEnquadrado = false } = {}) {
   // Devolve o logo exatamente como veio. Por padrão o motivo do não-recorte é
   // o mesmo da não-remoção (fundo fotográfico, por exemplo, impede os dois).
   const manter = (motivo, motivoRecorte = motivo, diagRecorte = null) =>
     ({ url: dataUrl, semFundo: false, motivo, recortado: false, motivoRecorte, diagRecorte });
 
   if (!dataUrl) return manter("sem logo");
+
+  // Único ponto por onde o recorte automático passa, para a trava do
+  // enquadramento manual valer nos três caminhos possíveis lá embaixo.
+  const cortar = (canvas, ctx, w, h, criterio, borda) =>
+    jaEnquadrado
+      ? { canvas: null, motivo: "o cliente enquadrou o logo na tela de ajuste", diag: null }
+      : recortarNoConteudo(canvas, ctx, w, h, criterio, borda);
 
   try {
     const { canvas, ctx, w, h } = await carregarNoCanvas(dataUrl);
@@ -210,7 +297,7 @@ export async function removerFundoLogo(dataUrl) {
       // desenho — então ainda dá para enquadrar. Recorte e transparência
       // são decisões independentes.
       const motivo = "o logo já tem fundo transparente";
-      const corte = recortarNoConteudo(canvas, ctx, w, h, "alfa", null);
+      const corte = cortar(canvas, ctx, w, h, "alfa", null);
       if (!corte.canvas) return manter(motivo, corte.motivo, corte.diag);
       return {
         url: corte.canvas.toDataURL("image/png"), semFundo: false, motivo,
@@ -232,7 +319,7 @@ export async function removerFundoLogo(dataUrl) {
     // Lê os pixels do canvas, que continua com a imagem original (o flood fill
     // abaixo mexe numa cópia e só volta pro canvas no passo 5).
     const enquadrarComFundo = (motivo) => {
-      const corte = recortarNoConteudo(canvas, ctx, w, h, "cor", borda);
+      const corte = cortar(canvas, ctx, w, h, "cor", borda);
       if (!corte.canvas) return manter(motivo, corte.motivo, corte.diag);
       return {
         url: corte.canvas.toDataURL("image/png"), semFundo: false, motivo,
@@ -302,7 +389,7 @@ export async function removerFundoLogo(dataUrl) {
 
     // 6) Recorta no desenho (o fundo virou transparência, então o alfa diz
     // onde ele está) e exporta em PNG, o formato com alfa.
-    const corte = recortarNoConteudo(canvas, ctx, w, h, "alfa", borda);
+    const corte = cortar(canvas, ctx, w, h, "alfa", borda);
     const final = corte.canvas || canvas;
     return {
       url: final.toDataURL("image/png"), semFundo: true, motivo: "",
@@ -340,8 +427,9 @@ async function brilhoDoLogo(dataUrl) {
 
 // Wrapper para os pontos de envio: remove o fundo e registra no console
 // o motivo quando desiste, para nunca falhar em silêncio.
-export async function prepararLogoEnviado(dataUrl) {
-  const r = await removerFundoLogo(dataUrl);
+// opcoes é repassado a removerFundoLogo — ver { jaEnquadrado } lá.
+export async function prepararLogoEnviado(dataUrl, opcoes) {
+  const r = await removerFundoLogo(dataUrl, opcoes);
   if (!dataUrl) return { ...r, brilho: null };
 
   // Medido sobre o logo FINAL (já recortado): é ele que vai para o post.

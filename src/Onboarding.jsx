@@ -1,6 +1,7 @@
 import { useState, useMemo, useRef, useEffect } from "react";
 import { DADOS } from "./dados.js";
 import { prepararLogoEnviado } from "./logo.js";
+import { useEnvioDeLogo } from "./RecorteLogo.jsx";
 
 /* ============================================================
    POST FÁCIL — Fluxo de escolha de segmento + perguntas
@@ -507,23 +508,18 @@ function TelaLogo({ tipoInfo, valores, onVoltar, onAvancar }) {
   const [semFundo, setSemFundo] = useState(!!valores.logoSemFundo);
   const [brilho, setBrilho] = useState(valores.logoBrilho || null);
   const [analisando, setAnalisando] = useState(false);
-  const fileRef = useRef(null);
-  function escolherArquivo(e) {
-    const f = e.target.files?.[0];
-    if (!f) return;
-    const reader = new FileReader();
-    reader.onload = async () => {
-      setAnalisando(true);
-      // Fundo removido já aqui, no envio: o cliente vê no preview o mesmo
-      // logo que vai entrar nos posts. Se não der, volta o original.
-      const r = await prepararLogoEnviado(reader.result);
-      setLogo(r.url);
-      setSemFundo(r.semFundo);
-      setBrilho(r.brilho);
-      analisarLogoComIA(r.url).then(() => setAnalisando(false)).catch(() => setAnalisando(false));
-    };
-    reader.readAsDataURL(f);
-  }
+  // Todo logo enviado passa pela tela de enquadramento antes de virar logo.
+  const envio = useEnvioDeLogo(async (recortado) => {
+    setAnalisando(true);
+    // Fundo removido já aqui, no envio: o cliente vê no preview o mesmo
+    // logo que vai entrar nos posts. Se não der, volta o original.
+    // jaEnquadrado: o recorte é o que o cliente acabou de escolher na alça.
+    const r = await prepararLogoEnviado(recortado, { jaEnquadrado: true });
+    setLogo(r.url);
+    setSemFundo(r.semFundo);
+    setBrilho(r.brilho);
+    analisarLogoComIA(r.url).then(() => setAnalisando(false)).catch(() => setAnalisando(false));
+  });
   return (
     <div>
       <BotaoVoltar onClick={onVoltar} rotulo="Voltar" />
@@ -533,7 +529,7 @@ function TelaLogo({ tipoInfo, valores, onVoltar, onAvancar }) {
       <div style={{ marginTop: 22 }}>
         {!logo ? (
           <div style={{ display: "flex", flexDirection: "column", gap: 12, animation: "fadeUp .35s ease both" }}>
-            <button onClick={() => fileRef.current?.click()}
+            <button onClick={envio.abrir}
               style={{ width: "100%", padding: "16px", background: "#003BA0", color: "white", border: "none", borderRadius: 16, fontSize: 16, fontWeight: 800, cursor: "pointer", fontFamily: FONT }}>
               📤 Enviar meu logotipo
             </button>
@@ -562,12 +558,21 @@ function TelaLogo({ tipoInfo, valores, onVoltar, onAvancar }) {
             {analisando ? (
               <div style={{ fontSize: 14, color: cor, fontWeight: 700 }}><span className="pf-pulse">🎨 Analisando cores e estilo do seu logo…</span></div>
             ) : (
-              <div style={{ fontSize: 14, color: C.sub }}>Logo recebido! ✅ <button onClick={() => fileRef.current?.click()} style={{ background: "none", border: "none", color: cor, fontWeight: 700, cursor: "pointer", fontFamily: FONT, fontSize: 14 }}>Trocar</button></div>
+              <div style={{ fontSize: 14, color: C.sub }}>
+                Logo recebido! ✅
+                {/* Ajustar recorte só aparece com o original ainda em memória
+                    (mesma sessão de envio); o que ficou salvo é o recortado. */}
+                {envio.podeAjustar && (
+                  <> <button onClick={envio.ajustar} style={{ background: "none", border: "none", color: cor, fontWeight: 700, cursor: "pointer", fontFamily: FONT, fontSize: 14 }}>Ajustar recorte</button> ·</>
+                )}
+                {" "}<button onClick={envio.abrir} style={{ background: "none", border: "none", color: cor, fontWeight: 700, cursor: "pointer", fontFamily: FONT, fontSize: 14 }}>Trocar</button>
+              </div>
             )}
           </div>
         )}
-        <input ref={fileRef} type="file" accept="image/*" onChange={escolherArquivo} style={{ display: "none" }} />
+        {envio.campo}
       </div>
+      {envio.tela}
       {logo && (
         <BotaoPrincipal cor={cor} desabilitado={analisando} onClick={() => onAvancar({ logo, logoSemFundo: semFundo, logoBrilho: brilho, criarLogoDepois: false })}>
           Continuar →
