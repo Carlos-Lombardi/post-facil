@@ -244,13 +244,24 @@ export function saudacaoMotivacional(nomePessoa) {
 // CONFIG DO ENVIO DIÁRIO NO WHATSAPP (Seção 7)
 // opt-in ativo; parar só dentro do app. Persistido por cliente.
 // ============================================================
+
+// Formato padrão da entrega: 9:16 (Stories), não mais a alternância com o
+// 4:5. O Instagram passou a aceitar o vertical no feed, então um formato só
+// serve aos dois lugares e o cliente não precisa decidir nada.
+// O 4:5 continua disponível: é o botão "Sempre Feed" no card do WhatsApp.
+// Constante em vez de literal repetido porque o mesmo padrão é lido em
+// quatro pontos, e antes bastava esquecer um deles para o app se contradizer.
+export const FORMATO_WPP_PADRAO = "sempreStories";
+
+const configWppInicial = () => ({ ativo: false, hora: "09:00", formato: FORMATO_WPP_PADRAO });
+
 export function getWppConfig(profile) {
   try {
     return JSON.parse(localStorage.getItem(chaveCliente(profile, "pf_wpp_")) || "null") ||
-      { ativo: false, hora: "09:00", formato: "alternar" };
+      configWppInicial();
   } catch (e) {
     console.error("Falha ao ler config de WhatsApp:", e);
-    return { ativo: false, hora: "09:00", formato: "alternar" };
+    return configWppInicial();
   }
 }
 export function saveWppConfig(profile, cfg) {

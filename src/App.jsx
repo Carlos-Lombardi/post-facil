@@ -14,7 +14,7 @@ import {
   ADMIN_PASS, DEFAULT_CODES, getDefaultLimits, getOverrides,
   saudacaoMotivacional, incPostCreditos, mensagemCreditos, podeGerarPost,
   creditosMes, zerarPostCreditos, estourarPostCreditos,
-  getWppConfig, saveWppConfig, doCopy, chaveCliente,
+  getWppConfig, saveWppConfig, FORMATO_WPP_PADRAO, doCopy, chaveCliente,
 } from "./shared.jsx";
 import logoPostFacil from "./assets/logo-postfacil.png";
 import bannerCatalogo from "./assets/banner-catalogo.jpg";
@@ -1986,7 +1986,7 @@ function CardWhatsApp({ profile }) {
   const [cfg, setCfg] = useState(() => getWppConfig(profile));
   const [modo, setModo] = useState(() => (getWppConfig(profile).ativo ? "selo" : "convite")); // convite | ajustes | selo
   const [hora, setHora] = useState(cfg.hora || "09:00");
-  const [formato, setFormato] = useState(cfg.formato || "alternar");
+  const [formato, setFormato] = useState(cfg.formato || FORMATO_WPP_PADRAO);
 
   const fopt = (val, sel) => ({ flex: 1, textAlign: "center", padding: "15px 4px", border: "1.5px solid " + (sel ? "#25A244" : "#cde9a0"), borderRadius: 12, fontSize: 12, fontWeight: 800, color: sel ? "#fff" : "#5C7686", cursor: "pointer", background: sel ? "#25A244" : "#fff", lineHeight: 1.3 });
   const labelFormato = { sempreFeed: "Sempre Feed", sempreStories: "Sempre Stories", alternar: "Alternando Feed/Stories" };
@@ -2001,7 +2001,7 @@ function CardWhatsApp({ profile }) {
   if (modo === "selo") {
     return (
       <div onClick={() => setModo("ajustes")} style={{ margin: "40px 20px 0", background: "#e9f9ee", border: "1px solid #25A244", borderRadius: 14, padding: "14px 16px", fontSize: 13, color: "#1a7a3f", fontWeight: 800, textAlign: "center", cursor: "pointer" }}>
-        ✅ Envio diário ativo às {cfg.hora} · {labelFormato[cfg.formato] || "Alternando Feed/Stories"}
+        ✅ Envio diário ativo às {cfg.hora} · {labelFormato[cfg.formato] || labelFormato[FORMATO_WPP_PADRAO]}
         <span style={{ display: "block", fontWeight: 600, fontSize: 11, marginTop: 2 }}>toque para ajustar</span>
       </div>
     );
