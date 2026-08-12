@@ -7,6 +7,10 @@ import { criarFicha, salvarFicha, carregarFicha, garantirClienteId } from "./fic
 import { DADOS } from "./dados.js";
 import { gerarTexto, gerarImagem } from "./api.js";
 import { analisarCorDoLogo, escurecerParaContraste } from "./cor.js";
+import {
+  publicoDoCliente, rotuloDoPublico, temBibliotecaDeGanchos,
+  blocoCopyParaSystem, blocoEscolhaDaFamilia, normalizarFamilia, nomeDaFamilia,
+} from "./ganchos.js";
 import { prepararLogoEnviado } from "./logo.js";
 import { useEnvioDeLogo } from "./RecorteLogo.jsx";
 import {
@@ -82,6 +86,9 @@ function novoDebugNegocio() {
     jsonCru: "",          // resposta crua do Claude, antes de extrairJSON
     promptImagem: "",     // prompt final enviado ao gerador de imagem
     corMarca: "",         // cor da marca usada no layout
+    publico: "",          // regime de copy (comércio, saúde, advocacia...)
+    blocoFamilia: "",     // bloco da regra R4 enviado ao Claude
+    familiaEscolhida: "", // família que a nossa IA devolveu, já normalizada
     historicoTexto: "",   // bloco anti-repetição enviado ao Claude
     historicoCenas: [],   // cenas já usadas (só leitura; não vão à IA de imagem)
     msTexto: null,        // duração da chamada de texto
@@ -266,6 +273,9 @@ function blocoHistoricoParaTexto(hist) {
     // lido como reserva para os históricos já salvos no navegador do cliente
     // não virarem "-" até saírem da janela. Itens novos usam h.cena.
     `${i + 1}. Cena: ${h.cena || h.resumoCena || "-"} | Tipo: ${(h.cenaTipo || "pessoas") === "produto" ? "só o produto" : "com pessoas"}`
+    // Registro anterior à biblioteca de ganchos não tem família: mostra "-" e
+    // a contagem da R4 simplesmente não o conta.
+    + ` | Família: ${h.familia ? nomeDaFamilia(h.familia) : "-"}`
     + ` | Tema do texto: ${h.temaTexto || "-"}`
     + ` | Tom: ${h.tom || "-"} | Cor: ${h.corDestaque || "-"}`
   ).join("\n");
@@ -277,18 +287,103 @@ function blocoHistoricoParaTexto(hist) {
   ].join("\n");
 }
 
-// Quebra o texto_imagem em até 2 linhas equilibradas (como no desenho).
+// ---- Quebra e tamanho da chamada (texto_imagem) ----
+// A biblioteca de ganchos liberou a chamada para ATÉ 3 LINHAS (regra R3);
+// antes o desenho só previa 2. Duas funções resolvem isso juntas:
+// quebrarEmLinhas escolhe onde quebrar e tamanhoDaChamada escolhe a fonte.
+// Palavra NUNCA é cortada: quando o texto não cabe, quem cede é a fonte.
+
+// Quantos caracteres cabem numa linha na fonte cheia. Vem do desenho: a caixa
+// do texto ocupa 88% da largura (padding 0 6%) e a fonte é Arial Black a
+// 8,15cqi, cujo caractere médio mede ~0,62 do corpo — 88 / (8,15 × 0,62) ≈ 17.
+const CHARS_POR_LINHA = 17;
+const FONTE_CHAMADA = 8.15;  // cqi — o tamanho do desenho, teto para 1 e 2 linhas
+const FONTE_CHAMADA_MIN = 5.2; // piso: abaixo disso não se lê no celular
+
+// Melhor quebra do texto em EXATAMENTE n linhas: a que deixa a linha mais
+// longa a menor possível (equilíbrio). Devolve null quando não há palavras
+// suficientes para n linhas.
+function melhorQuebra(palavras, n) {
+  if (palavras.length < n) return null;
+  if (n === 1) return [palavras.join(" ")];
+
+  let melhor = null, menorMax = Infinity;
+  // Corte 1 em i, corte 2 em j (só usado quando n === 3).
+  for (let i = 1; i <= palavras.length - (n - 1); i++) {
+    if (n === 2) {
+      const linhas = [palavras.slice(0, i).join(" "), palavras.slice(i).join(" ")];
+      const max = Math.max(...linhas.map((l) => l.length));
+      if (max < menorMax) { menorMax = max; melhor = linhas; }
+      continue;
+    }
+    for (let j = i + 1; j <= palavras.length - 1; j++) {
+      const linhas = [
+        palavras.slice(0, i).join(" "),
+        palavras.slice(i, j).join(" "),
+        palavras.slice(j).join(" "),
+      ];
+      const max = Math.max(...linhas.map((l) => l.length));
+      if (max < menorMax) { menorMax = max; melhor = linhas; }
+    }
+  }
+  return melhor;
+}
+
+// Quebra o texto_imagem em até 3 linhas equilibradas. Usa o MENOR número de
+// linhas em que o texto ainda cabe na fonte cheia; se nem em 3 couber, fica em
+// 3 e o tamanho da fonte é reduzido por tamanhoDaChamada.
 function quebrarEmLinhas(txt) {
   const palavras = String(txt || "").trim().split(/\s+/).filter(Boolean);
   if (palavras.length <= 1) return palavras;
-  let melhor = [palavras.join(" ")], menorDif = Infinity;
-  for (let i = 1; i < palavras.length; i++) {
-    const a = palavras.slice(0, i).join(" ");
-    const b = palavras.slice(i).join(" ");
-    const dif = Math.abs(a.length - b.length);
-    if (dif < menorDif) { menorDif = dif; melhor = [a, b]; }
+
+  let ultima = null;
+  for (let n = 1; n <= 3; n++) {
+    const linhas = melhorQuebra(palavras, n);
+    if (!linhas) break;              // não há palavras para mais linhas
+    ultima = linhas;
+    if (Math.max(...linhas.map((l) => l.length)) <= CHARS_POR_LINHA) return linhas;
   }
-  return melhor;
+  return ultima || [palavras.join(" ")];
+}
+
+// Tamanho da fonte da chamada, em cqi. Duas folgas mandam, e vale a menor:
+//  • LARGURA — a linha mais longa precisa caber nos 88% de largura da caixa;
+//  • ALTURA  — o bloco inteiro precisa caber na faixa escura do topo, que é
+//    onde o texto tem contraste para ser lido (o degradê cobre 365/1350 da
+//    altura e o texto começa em 5,9% dela). Sem esta folga, a terceira linha
+//    caía fora do degradê, sobre a foto crua.
+function tamanhoDaChamada(linhas) {
+  if (!linhas.length) return FONTE_CHAMADA;
+
+  const maisLonga = Math.max(...linhas.map((l) => l.length));
+  const porLargura = FONTE_CHAMADA * (CHARS_POR_LINHA / maisLonga);
+
+  const fimDoDegrade = (NEGOCIO.grad.h / 1350) * ALTURA_CARD;
+  const porAltura = (fimDoDegrade - INICIO_DO_TEXTO) / (linhas.length * 1.11);
+
+  return Math.max(FONTE_CHAMADA_MIN, Math.min(FONTE_CHAMADA, porLargura, porAltura));
+}
+
+// Alturas do desenho em cqi (a altura do card é 1350/1080 = 125cqi).
+const ALTURA_CARD = (1350 / 1080) * 100;
+const INICIO_DO_TEXTO = (NEGOCIO.texto.offset / 100) * ALTURA_CARD;
+
+// Onde a última linha do texto termina DENTRO do degradê, no desenho original:
+// com 2 linhas na fonte cheia, o texto acaba a 75,5% da faixa escura. O
+// degradê desbota até zero no fim, então esta proporção é a "profundidade
+// segura" — o ponto até onde ainda há escurecimento suficiente para ler.
+const FIM_SEGURO_DO_TEXTO = 0.755;
+
+// Altura do degradê do topo, em unidades do viewBox (1080×1350).
+// Com 1 ou 2 linhas devolve exatamente o número do desenho (365). Com 3
+// linhas — que a regra R3 da biblioteca de ganchos liberou — o texto desce
+// mais, e a faixa escura desce junto: sem isso a terceira linha cairia sobre
+// a foto crua, sem contraste. Para voltar ao degradê fixo do desenho, é só
+// devolver NEGOCIO.grad.h aqui.
+function alturaDoDegrade(linhas, fonte) {
+  const fimDoTexto = INICIO_DO_TEXTO + linhas.length * 1.11 * fonte;
+  const precisa = (fimDoTexto / FIM_SEGURO_DO_TEXTO) / ALTURA_CARD * 1350;
+  return Math.max(NEGOCIO.grad.h, Math.round(precisa));
 }
 
 // ============================================================
@@ -874,8 +969,11 @@ function normalizarHashtags(hashtags) {
 // As chaves do JSON, na ordem em que a nossa IA as escreve. A extração por
 // esquema usa esta lista como delimitador: o fim de um valor é a CHAVE
 // SEGUINTE, não a aspa — é por isso que ela aguenta aspas soltas no texto.
+// "familia" vem PRIMEIRO porque é a primeira decisão do post (a família de
+// gancho escolhida): a biblioteca manda escolher a família antes de escrever
+// qualquer palavra, e a ordem desta lista é a ordem em que a nossa IA escreve.
 const CHAVES_JSON_NEGOCIO = [
-  "legenda", "texto_imagem", "descricao_fundo", "resumo_cena", "cta", "hashtags",
+  "familia", "legenda", "texto_imagem", "descricao_fundo", "resumo_cena", "cta", "hashtags",
 ];
 
 // Recorta do primeiro "{" ao último "}": tira prosa e cercas ``` em volta.
@@ -989,20 +1087,35 @@ async function gerarPostNegocioReal(profile) {
   // a diretriz E deixa o tema do post sobrepor a vez quando não combinar.
   const tipoCena = proximoTipoCena(hist);
 
+  // Público de COPY deste cliente (comércio, saúde, advocacia, profissional
+  // sem conselho, pessoal). É ele que decide o teste de credibilidade, as
+  // famílias de gancho liberadas e a natureza do CTA. Ver src/ganchos.js.
+  const publico = publicoDoCliente(profile);
+  const usaGanchos = temBibliotecaDeGanchos(publico);
+
   // Espelho de leitura para o painel de desenvolvedor. Fora do modo ?dev
   // fica null e nenhuma linha abaixo faz nada. Nada aqui altera a geração.
   const dbg = DEV_ON ? novoDebugNegocio() : null;
 
   const system = [
-    "Você é o diretor de arte do Post Fácil, um app que cria posts profissionais de Instagram para pequenos negócios brasileiros.",
-    "Você PENSA A PEÇA INTEIRA DE UMA VEZ (imagem, texto da imagem e legenda nascem do mesmo raciocínio, coerentes entre si).",
+    "Você é o diretor de arte E o redator do Post Fácil, um app que cria posts profissionais de Instagram para pequenos negócios e profissionais brasileiros.",
+    "Você PENSA A PEÇA INTEIRA DE UMA VEZ (texto e imagem nascem do mesmo raciocínio e ficam amarrados entre si).",
     "",
-    "Responda SEMPRE em português do Brasil e APENAS com um JSON válido, sem texto antes ou depois, sem cercas de código. O JSON tem exatamente estas chaves:",
-    '- "legenda": legenda do post para o Instagram, calorosa e profissional, coerente com o texto_imagem.',
-    '- "texto_imagem": texto CURTO (poucas palavras, cabe em até 2 linhas) que será aplicado por cima da imagem.',
+    "Responda SEMPRE em português do Brasil e APENAS com um JSON válido, sem texto antes ou depois, sem cercas de código. O JSON tem exatamente estas chaves, NESTA ORDEM:",
+    ...(usaGanchos
+      ? ['- "familia": o id da família de gancho escolhida, exatamente como aparece na lista de famílias liberadas mais abaixo (ex.: lista, bastidor, objecao). Uso interno.']
+      : []),
+    usaGanchos
+      ? '- "legenda": a legenda do post no Instagram. Ela PAGA a promessa feita no texto_imagem, entregando exatamente o que a família de gancho escolhida manda entregar. Concreta e específica, construída com a informação real do cadastro do cliente — nunca elogio genérico ao negócio.'
+      : '- "legenda": legenda do post para o Instagram, calorosa e profissional, coerente com o texto_imagem.',
+    usaGanchos
+      ? '- "texto_imagem": a CHAMADA do post — o texto grande aplicado por cima da imagem. É a PROMESSA da família escolhida. No máximo 3 linhas curtas, de 6 a 10 palavras no total.'
+      : '- "texto_imagem": texto CURTO (poucas palavras, cabe em até 2 linhas) que será aplicado por cima da imagem.',
     '- "descricao_fundo": descrição do cenário para a IA de imagem, em UMA ÚNICA FRASE CORRIDA de NO MÁXIMO 100 PALAVRAS (não use listas, tópicos nem várias frases). A descrição deve COMEÇAR pelo enquadramento. É PROIBIDO usar as palavras "fechado", "close", "close-up" ou "plano médio fechado". Em cenas COM PESSOAS, o enquadramento deve ser "plano americano" ou "plano aberto" (nunca "plano médio", que é da cintura para cima e deixa a cabeça alta demais), com a pessoa afastada da câmera e espaço vazio acima da cabeça; "plano médio" só é permitido em cenas SEM PESSOAS. SEM texto/letras/palavras na cena. Descreva uma FOTOGRAFIA REAL (não ilustração/desenho/3D), COM ou SEM pessoas conforme o TIPO DE CENA pedido nesta geração, com astral positivo e acolhedor, e faça a cena ALUDIR ao texto_imagem (imagem e texto conversam). Em cenas SEM PESSOAS, o assunto principal fica CENTRALIZADO (no miolo da imagem). Em cenas COM PESSOAS, é PROIBIDO escrever que o produto, o objeto ou as mãos ficam "centralizados", "no meio" ou "no centro da imagem": quem ocupa a faixa central é o ROSTO, e o produto aparece logo ABAIXO do rosto, na altura do peito ou do balcão — a frase precisa dizer isso de forma explícita. O topo e a base ficam calmos, com fundo neutro e desfocado. Uso interno.',
     '- "resumo_cena": etiqueta CURTA de NO MÁXIMO 8 PALAVRAS que identifica o TIPO de cena da descricao_fundo, para servir de memória entre posts. É um RÓTULO, não uma descrição: sem enquadramento, sem luz, sem adjetivos de estilo. Exemplos: "cliente escolhendo capinha em expositor giratório", "técnico consertando notebook na bancada", "entrega de pacote na porta". Uso interno.',
-    '- "cta": chamada para ação curta.',
+    usaGanchos
+      ? '- "cta": a chamada para ação, de NO MÁXIMO 45 CARACTERES (ela é aplicada numa faixa pequena no rodapé da arte). Estende o que a legenda pagou e segue o TIPO de CTA da família escolhida — ver a regra R7.'
+      : '- "cta": chamada para ação curta.',
     '- "hashtags": array de 4 a 6 hashtags do segmento (sem espaços dentro de cada uma).',
     "",
     "REGRAS DE PONTUAÇÃO DO JSON (a resposta é lida por máquina; um erro aqui perde o post inteiro):",
@@ -1011,6 +1124,10 @@ async function gerarPostNegocioReal(profile) {
     "- Separe as chaves com vírgula, e não ponha vírgula depois da última.",
     "- Sem cercas de código, sem comentários e sem nenhum texto antes ou depois do JSON.",
     "",
+    // A biblioteca de ganchos (src/ganchos.js) entra AQUI, entre as regras do
+    // JSON e a direção de arte: ela governa só a copy, e o bloco vem pronto e
+    // já filtrado pelo público do cliente.
+    ...(usaGanchos ? [blocoCopyParaSystem(publico), ""] : []),
     "DIRETRIZES OBRIGATÓRIAS:",
     "A. A imagem recebe uma camada gráfica por cima: uma faixa colorida e um texto grande cobrem os 20% do topo e os 20% da base. Por isso a descricao_fundo DEVE manter o assunto principal inteiramente no miolo (60% centrais) e descrever o topo e a base como áreas calmas — fundo neutro, desfocado, sem elementos importantes.",
     "B. Tom profissional que impressione: use na descricao_fundo termos como iluminação profissional, composição cuidada, aparência premium, foco nítido, cores harmoniosas.",
@@ -1026,11 +1143,20 @@ async function gerarPostNegocioReal(profile) {
   // Extraído para uma constante só para o painel poder mostrá-lo à parte.
   const blocoHist = blocoHistoricoParaTexto(hist);
 
+  // Bloco da regra R4 (família proibida + as menos usadas). A conta é feita em
+  // código, não pela nossa IA: ela recebe o resultado pronto.
+  const blocoFamilia = usaGanchos ? blocoEscolhaDaFamilia(publico, hist) : "";
+
   const user = [
-    "Gere UM post de Instagram para este negócio.",
+    "Gere UM post de Instagram para este cliente.",
     "",
     `Negócio: ${nomeNeg}`,
     `Segmento: ${segNome}`,
+    // O público decide o teste de credibilidade, as famílias liberadas e a
+    // natureza do CTA. Sem esta linha a nossa IA escrevia para todo mundo
+    // como se fosse comércio — inclusive para médico e advogado.
+    `Público (regime de copy): ${rotuloDoPublico(publico)}`,
+    profile.tipo === "profissional" ? `Profissão: ${segNome}` : "",
     `Tom de comunicação (até 2): ${tons}`,
     cores ? `Cores da marca: ${cores}` : "",
     estiloLogo ? `Estilo do logo: ${estiloLogo}` : "",
@@ -1038,12 +1164,16 @@ async function gerarPostNegocioReal(profile) {
     "Respostas do onboarding do cliente:",
     qa || "(sem respostas registradas)",
     blocoHist,
+    blocoFamilia,
     "",
     tipoCena === "produto"
       ? "TIPO DE CENA DESTA GERAÇÃO (vez do ciclo 2 com pessoas : 1 só produto): SÓ O PRODUTO, sem pessoas na cena — produto realista e centralizado, à mostra, sem embalagem com rótulo (diretrizes E e F)."
       : "TIPO DE CENA DESTA GERAÇÃO (vez do ciclo 2 com pessoas : 1 só produto): COM PESSOAS na cena (diretriz E).",
     "Se o tema do post claramente não combinar com esse tipo, o tema manda — a diretriz E autoriza trocar.",
     "",
+    usaGanchos
+      ? "Antes de escrever qualquer palavra: escolha a família de gancho, confirme que consegue PAGAR a promessa dela com o que está nas respostas acima (R1) e só então escreva chamada, legenda e CTA na mesma passada."
+      : "",
     "Lembre-se: mantenha o assunto centralizado no miolo, deixe o topo e a base calmos, e varie a cena a cada post. Responda só com o JSON.",
   ]
     .filter(Boolean)
@@ -1054,6 +1184,8 @@ async function gerarPostNegocioReal(profile) {
     dbg.promptPadrao = system;
     dbg.promptCliente = user;
     dbg.historicoTexto = blocoHist;
+    dbg.publico = rotuloDoPublico(publico);
+    dbg.blocoFamilia = blocoFamilia;
     dbg.corMarca = corDeLayout(profile);
   }
 
@@ -1066,6 +1198,12 @@ async function gerarPostNegocioReal(profile) {
   }
   marcarPasso("leitura do JSON");
   const j = extrairJSON(texto);
+  if (dbg) {
+    const fam = normalizarFamilia(j.familia);
+    dbg.familiaEscolhida = fam
+      ? nomeDaFamilia(fam)
+      : `(não reconhecida — a nossa IA devolveu "${(j.familia || "").trim() || "nada"}")`;
+  }
 
   // Passo 3 da referência: a IA de imagem gera a imagem LIMPA (sem texto),
   // recebendo só a descricao_fundo. A camada gráfica (onda, logo e texto) é
@@ -1092,6 +1230,10 @@ async function gerarPostNegocioReal(profile) {
   marcarPasso("montagem final");
   registrarPostNegocio(profile, {
     cena: cenaParaHistorico(j),
+    // Família de gancho deste post — é o que faz a R4 funcionar na próxima
+    // geração. Vazia quando a nossa IA devolveu algo que não reconhecemos:
+    // aí o post sai igual e só a contagem não conta este.
+    familia: normalizarFamilia(j.familia),
     // O que foi PEDIDO nesta vez. É o que faz o ciclo 2:1 andar. Se a diretriz E
     // tiver deixado o tema sobrepor a vez, o registro não reflete o que saiu.
     cenaTipo: tipoCena,
@@ -1602,6 +1744,9 @@ function TelaCarregamento() {
 function OverlayNegocio({ cor, logo, logoBrilho, destaque, sub }) {
   const L = NEGOCIO;
   const linhas = quebrarEmLinhas(destaque);
+  // Chamada de até 3 linhas (R3 da biblioteca de ganchos): o corpo da fonte
+  // encolhe sozinho quando o texto é longo, em vez de cortar palavra.
+  const fonte = tamanhoDaChamada(linhas);
   const gid = "pfgrad-neg";
   const cta = String(sub || "").trim();
 
@@ -1657,7 +1802,7 @@ function OverlayNegocio({ cor, logo, logoBrilho, destaque, sub }) {
             ))}
           </linearGradient>
         </defs>
-        <rect x="0" y={L.grad.y} width="1080" height={L.grad.h} fill={`url(#${gid})`} />
+        <rect x="0" y={L.grad.y} width="1080" height={alturaDoDegrade(linhas, fonte)} fill={`url(#${gid})`} />
         <path d={L.onda} fill={cor} />
       </svg>
 
@@ -1679,12 +1824,17 @@ function OverlayNegocio({ cor, logo, logoBrilho, destaque, sub }) {
       </div>
 
       {/* texto grande na faixa reservada, com a sombra difusa do desenho.
-          font-size 88/1080=8,15cqi; entrelinha 98/88=1,11; letter-spacing -1. */}
+          font-size 88/1080=8,15cqi (teto; encolhe em chamada de 3 linhas);
+          entrelinha 98/88=1,11; letter-spacing -1. */}
       <div style={boxTexto}>
         {linhas.map((linha, k) => (
           <div key={k} style={{
-                color: "#fff", fontWeight: 900, fontSize: "8.15cqi", lineHeight: 1.11,
-                letterSpacing: "-0.09cqi",
+                color: "#fff", fontWeight: 900, fontSize: fonte + "cqi", lineHeight: 1.11,
+                letterSpacing: (-0.09 * fonte / 8.15) + "cqi",
+                // Rede de segurança para uma palavra única gigante (que a
+                // quebra por palavras não tem como repartir): melhor o
+                // navegador dividir do que o texto vazar para fora do card.
+                overflowWrap: "anywhere",
                 textShadow: "0 0.5cqi 1.2cqi rgba(0,0,0,.62), 0 0.2cqi 0.5cqi rgba(0,0,0,.5)",
                 fontFamily: "'Arial Black','Helvetica Neue',system-ui,sans-serif" }}>
             {linha}
@@ -1806,6 +1956,16 @@ function PainelDev() {
     "Total das chamadas: " + formatarMs(totalMs || null),
   ].join("\n");
 
+  // Biblioteca de ganchos: o regime de copy do cliente, a conta da R4 que foi
+  // enviada e a família que a nossa IA acabou escolhendo.
+  const ganchos = [
+    "Público (regime de copy): " + (d.publico || "—"),
+    "Família escolhida neste post: " + (d.familiaEscolhida || "—"),
+    "",
+    "Bloco da escolha da família (regra R4) enviado ao Claude:",
+    d.blocoFamilia || "(nenhum — cliente sem biblioteca de ganchos, ou primeiro post)",
+  ].join("\n");
+
   const corEHistorico = [
     "Cor da marca usada no layout: " + (d.corMarca || "—"),
     "",
@@ -1853,9 +2013,10 @@ function PainelDev() {
           <BlocoDev titulo="3 · Prompt completo enviado ao Claude (as duas camadas)" conteudo={montarPromptCompleto(d)} onCopiar={copiar} />
           <BlocoDev titulo="4 · JSON cru devolvido pelo Claude" conteudo={d.jsonCru} onCopiar={copiar} />
           <BlocoDev titulo="5 · Prompt final enviado ao gerador de imagem" conteudo={d.promptImagem} onCopiar={copiar} />
-          <BlocoDev titulo="6 · Cor da marca e histórico anti-repetição" conteudo={corEHistorico} onCopiar={copiar} />
-          <BlocoDev titulo="7 · Tempo de cada chamada" conteudo={tempos} onCopiar={copiar} />
-          <BlocoDev titulo="8 · Erro da última geração" conteudo={erro} onCopiar={copiar} />
+          <BlocoDev titulo="6 · Biblioteca de ganchos — público e família escolhida" conteudo={ganchos} onCopiar={copiar} />
+          <BlocoDev titulo="7 · Cor da marca e histórico anti-repetição" conteudo={corEHistorico} onCopiar={copiar} />
+          <BlocoDev titulo="8 · Tempo de cada chamada" conteudo={tempos} onCopiar={copiar} />
+          <BlocoDev titulo="9 · Erro da última geração" conteudo={erro} onCopiar={copiar} />
           <div style={{ color: "#475569", fontSize: 10, lineHeight: 1.5, marginTop: 4 }}>
             Visível só com ?dev na URL. Nenhuma chave de API passa pelo app — elas ficam no servidor.
           </div>
