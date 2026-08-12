@@ -1191,7 +1191,13 @@ async function gerarPostNegocioReal(profile) {
 
   marcarPasso("chamada do texto (Claude)");
   const t0Texto = performance.now();
-  const texto = await gerarTexto(system, user, 3000);
+  // 16000 = teto da resposta. O JSON inteiro do post dá uns 700 tokens; todo
+  // o resto é folga para o RACIOCÍNIO, que divide este teto com o texto (ver
+  // api/claude.js). Com 3000 a biblioteca de ganchos não cabia: o raciocínio
+  // levava tudo e o post caía no modo demonstração. 16000 é o limite seguro
+  // para uma chamada sem streaming — acima disso a resposta demora o
+  // bastante para esbarrar no tempo da função do Vercel.
+  const texto = await gerarTexto(system, user, 16000);
   if (dbg) {
     dbg.msTexto = Math.round(performance.now() - t0Texto);
     dbg.jsonCru = texto;   // cru, exatamente como veio (antes de extrairJSON)

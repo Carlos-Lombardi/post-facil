@@ -39,7 +39,26 @@ export default async function handler(req, res) {
       },
       body: JSON.stringify({
         model: "claude-sonnet-5",
+        // TETO DA RESPOSTA. Cobre o RACIOCÍNIO + o texto do JSON, os dois
+        // juntos — não só a resposta. É o que quebrou o post quando a
+        // biblioteca de ganchos entrou: o raciocínio ficou mais longo,
+        // consumiu os 3000 tokens sozinho e o JSON nunca começou a ser
+        // escrito (stop_reason: max_tokens, resposta só com bloco de
+        // pensamento). Quem manda no tamanho do raciocínio é o effort
+        // abaixo; este número é só o limite de segurança, e o modelo NÃO o
+        // enxerga — deixá-lo folgado não faz ele pensar mais nem custa mais
+        // (a cobrança é pelo que sai, não pelo teto).
         max_tokens: max_tokens || 1000,
+        // PENSAMENTO E ESFORÇO — explícitos de propósito.
+        // No claude-sonnet-5, OMITIR o campo "thinking" NÃO desliga o
+        // pensamento: liga o adaptativo com effort "high" por padrão. Era
+        // esse padrão invisível que gastava o teto inteiro. Agora as duas
+        // coisas estão escritas: pensamento adaptativo (a biblioteca de
+        // ganchos precisa dele para escolher a família e conferir as regras)
+        // com esforço MÉDIO, que é o suficiente para esta tarefa e mantém a
+        // geração longe do limite de 60s da função.
+        thinking: { type: "adaptive" },
+        output_config: { effort: "medium" },
         system: system || "",
         messages: [{ role: "user", content: user }],
       }),
