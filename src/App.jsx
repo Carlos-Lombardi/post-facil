@@ -89,6 +89,7 @@ function novoDebugNegocio() {
     publico: "",          // regime de copy (comércio, saúde, advocacia...)
     blocoFamilia: "",     // bloco da regra R4 enviado ao Claude
     familiaEscolhida: "", // família que a nossa IA devolveu, já normalizada
+    historiaVisual: "",   // a história que a cena conta (campo historia_visual)
     historicoTexto: "",   // bloco anti-repetição enviado ao Claude
     historicoCenas: [],   // cenas já usadas (só leitura; não vão à IA de imagem)
     msTexto: null,        // duração da chamada de texto
@@ -240,19 +241,6 @@ function limparHistoricoNegocio(profile) {
   }
 }
 
-// ---- Tipo de cena da vez: ciclo de 2 com pessoas : 1 só com o produto ----
-// A vez é DERIVADA dos últimos registros em vez de guardada num contador
-// próprio: assim nada dessincroniza se o histórico for cortado (slice de
-// HIST_NEG_MAX sempre mantém os 2 últimos). Registro antigo sem cenaTipo conta
-// como "pessoas", que é a verdade — até hoje toda imagem saía com pessoas.
-const CICLO_COM_PESSOAS = 2;
-function proximoTipoCena(hist) {
-  const ultimos = hist.slice(-CICLO_COM_PESSOAS);
-  if (ultimos.length < CICLO_COM_PESSOAS) return "pessoas";
-  const todasComPessoas = ultimos.every((h) => (h.cenaTipo || "pessoas") === "pessoas");
-  return todasComPessoas ? "produto" : "pessoas";
-}
-
 // Etiqueta curta da cena que vai para o histórico. Usa o resumo_cena que a
 // nossa IA devolve (rótulo de até 8 palavras); se vier vazio ou faltando, cai
 // nas 12 primeiras palavras da descricao_fundo — reserva para o histórico
@@ -272,7 +260,7 @@ function blocoHistoricoParaTexto(hist) {
     // h.resumoCena é o campo ANTIGO (guardava a descricao_fundo inteira):
     // lido como reserva para os históricos já salvos no navegador do cliente
     // não virarem "-" até saírem da janela. Itens novos usam h.cena.
-    `${i + 1}. Cena: ${h.cena || h.resumoCena || "-"} | Tipo: ${(h.cenaTipo || "pessoas") === "produto" ? "só o produto" : "com pessoas"}`
+    `${i + 1}. Cena: ${h.cena || h.resumoCena || "-"}`
     // Registro anterior à biblioteca de ganchos não tem família: mostra "-" e
     // a contagem da R4 simplesmente não o conta.
     + ` | Família: ${h.familia ? nomeDaFamilia(h.familia) : "-"}`
@@ -973,7 +961,7 @@ function normalizarHashtags(hashtags) {
 // gancho escolhida): a biblioteca manda escolher a família antes de escrever
 // qualquer palavra, e a ordem desta lista é a ordem em que a nossa IA escreve.
 const CHAVES_JSON_NEGOCIO = [
-  "familia", "legenda", "texto_imagem", "descricao_fundo", "resumo_cena", "cta", "hashtags",
+  "familia", "legenda", "texto_imagem", "historia_visual", "descricao_fundo", "resumo_cena", "cta", "hashtags",
 ];
 
 // Recorta do primeiro "{" ao último "}": tira prosa e cercas ``` em volta.
@@ -1083,10 +1071,6 @@ async function gerarPostNegocioReal(profile) {
   // chamar a nossa IA para orientá-la a criar algo diferente.
   const hist = lerHistoricoNegocio(profile);
 
-  // Vez desta geração no ciclo 2 com pessoas : 1 só produto. É só o PEDIDO —
-  // a diretriz E deixa o tema do post sobrepor a vez quando não combinar.
-  const tipoCena = proximoTipoCena(hist);
-
   // Público de COPY deste cliente (comércio, saúde, advocacia, profissional
   // sem conselho, pessoal). É ele que decide o teste de credibilidade, as
   // famílias de gancho liberadas e a natureza do CTA. Ver src/ganchos.js.
@@ -1111,10 +1095,11 @@ async function gerarPostNegocioReal(profile) {
     usaGanchos
       ? '- "texto_imagem": a CHAMADA do post — o texto grande aplicado por cima da imagem. É a PROMESSA da família escolhida. No máximo 3 linhas curtas, de 6 a 10 palavras no total.'
       : '- "texto_imagem": texto CURTO (poucas palavras, cabe em até 2 linhas) que será aplicado por cima da imagem.',
-    '- "descricao_fundo": descrição do cenário para a IA de imagem, em UMA ÚNICA FRASE CORRIDA de NO MÁXIMO 100 PALAVRAS (não use listas, tópicos nem várias frases). A descrição deve COMEÇAR pelo enquadramento. É PROIBIDO usar as palavras "fechado", "close", "close-up" ou "plano médio fechado". Em cenas COM PESSOAS, o enquadramento deve ser "plano americano" ou "plano aberto" (nunca "plano médio", que é da cintura para cima e deixa a cabeça alta demais), com a pessoa afastada da câmera e espaço vazio acima da cabeça; "plano médio" só é permitido em cenas SEM PESSOAS. SEM texto/letras/palavras na cena. Descreva uma FOTOGRAFIA REAL (não ilustração/desenho/3D), COM ou SEM pessoas conforme o TIPO DE CENA pedido nesta geração, com astral positivo e acolhedor, e faça a cena ALUDIR ao texto_imagem (imagem e texto conversam). Em cenas SEM PESSOAS, o assunto principal fica CENTRALIZADO (no miolo da imagem). Em cenas COM PESSOAS, é PROIBIDO escrever que o produto, o objeto ou as mãos ficam "centralizados", "no meio" ou "no centro da imagem": quem ocupa a faixa central é o ROSTO, e o produto aparece logo ABAIXO do rosto, na altura do peito ou do balcão — a frase precisa dizer isso de forma explícita. O topo e a base ficam calmos, com fundo neutro e desfocado. Uso interno.',
+    '- "historia_visual": UMA FRASE CURTA de NO MÁXIMO 20 PALAVRAS dizendo o que está acontecendo na cena e por que isso PROVA o gancho do texto_imagem. Uso interno.',
+    '- "descricao_fundo": a historia_visual já traduzida em imagem para a IA de imagem, em UMA ÚNICA FRASE CORRIDA de NO MÁXIMO 100 PALAVRAS (não use listas, tópicos nem várias frases): quem está na cena, fazendo o quê, com quais objetos, e o enquadramento, a luz e a composição que fazem isso ser lido. É PROIBIDO usar as palavras "fechado", "close" ou "close-up". SEM texto/letras/palavras na cena. Descreva uma FOTOGRAFIA REAL (não ilustração/desenho/3D). Toda a ação fica nos 50% CENTRAIS da imagem; o topo e a base ficam calmos, com fundo neutro e desfocado. Uso interno.',
     '- "resumo_cena": etiqueta CURTA de NO MÁXIMO 8 PALAVRAS que identifica o TIPO de cena da descricao_fundo, para servir de memória entre posts. É um RÓTULO, não uma descrição: sem enquadramento, sem luz, sem adjetivos de estilo. Exemplos: "cliente escolhendo capinha em expositor giratório", "técnico consertando notebook na bancada", "entrega de pacote na porta". Uso interno.',
     usaGanchos
-      ? '- "cta": a chamada para ação, de NO MÁXIMO 45 CARACTERES (ela é aplicada numa faixa pequena no rodapé da arte). Estende o que a legenda pagou e segue o TIPO de CTA da família escolhida — ver a regra R7.'
+      ? '- "cta": a chamada para ação, de NO MÁXIMO 45 CARACTERES (ela é aplicada numa faixa pequena no rodapé da arte). FECHA O LAÇO que a chamada abriu — nunca um convite genérico que serviria em qualquer post. Ver a regra R7.'
       : '- "cta": chamada para ação curta.',
     '- "hashtags": array de 4 a 6 hashtags do segmento (sem espaços dentro de cada uma).',
     "",
@@ -1128,13 +1113,21 @@ async function gerarPostNegocioReal(profile) {
     // JSON e a direção de arte: ela governa só a copy, e o bloco vem pronto e
     // já filtrado pelo público do cliente.
     ...(usaGanchos ? [blocoCopyParaSystem(publico), ""] : []),
+    "COMO PENSAR A IMAGEM — NESTA ORDEM, SEMPRE. Nunca comece pelo visual:",
+    "1. IDEIA: o que o gancho afirma, e o que precisa ser provado para alguém acreditar nele.",
+    "2. HISTÓRIA: o que está acontecendo na cena que prova essa ideia — quem está lá, fazendo o quê, com quais objetos, e qual situação torna a ideia visível.",
+    "3. QUADRO: só agora enquadramento, luz, composição e cor.",
+    "REGRA DE OURO: a imagem precisa PROVAR VISUALMENTE o gancho. TESTE OBRIGATÓRIO: esconda mentalmente o texto que vai por cima; se a cena sozinha não transmitir parte da ideia, ela está errada — refaça a HISTÓRIA antes de descrever o QUADRO.",
+    "EXEMPLO — gancho \"Quase ninguém consegue terminar esse combo\". Cena FRACA: três pessoas sorrindo comendo hambúrguer (mostra uma hamburgueria, não o desafio). Cena FORTE: mesa exageradamente cheia, o combo enorme ocupando o centro, e as pessoas diante daquilo em atitude de quem mede o tamanho da tarefa. A segunda prova o gancho.",
+    "EXEMPLO — gancho \"O erro que quase toda empresa comete na fachada\". NÃO peça uma cena feia: gerador de imagem faz isso mal e imagem feia prejudica o feed do cliente. Use COMPARAÇÃO: os dois casos lado a lado, para o erro aparecer por contraste.",
+    "REGRAS PRÁTICAS DA CENA: prove pela SITUAÇÃO, não pela emoção no rosto — quantidade exagerada, comparação lado a lado, gesto claro e objeto em uso funcionam; expressão sutil sai mal. Descreva AÇÃO acontecendo, nunca pessoas posando. Não especifique número exato de pessoas: escreva \"um grupo pequeno\" em vez de \"três amigos\". Nada de dinheiro identificável, e JAMAIS moeda estrangeira (o público é brasileiro).",
+    "",
     "DIRETRIZES OBRIGATÓRIAS:",
-    "A. A imagem recebe uma camada gráfica por cima: uma faixa colorida e um texto grande cobrem os 20% do topo e os 20% da base. Por isso a descricao_fundo DEVE manter o assunto principal inteiramente no miolo (60% centrais) e descrever o topo e a base como áreas calmas — fundo neutro, desfocado, sem elementos importantes.",
+    "A. ONDE A HISTÓRIA ACONTECE: a imagem recebe uma camada gráfica por cima — uma faixa colorida e um texto grande cobrem os 25% do topo e os 25% da base. Por isso TODA a ação e TODOS os elementos de prova ficam nos 50% CENTRAIS; o topo e a base seguem calmos, com fundo neutro e desfocado, sem nada importante. Cena movimentada no miolo, bordas limpas.",
     "B. Tom profissional que impressione: use na descricao_fundo termos como iluminação profissional, composição cuidada, aparência premium, foco nítido, cores harmoniosas.",
     "C. VARIE A CENA a cada post: mude cenário, ângulo, enquadramento e composição na descricao_fundo. Evite repetir o mesmo clichê (ex.: não caia sempre em \"xícara sobre balcão de madeira\"). Mantenha sempre a fidelidade ao segmento e à identidade do negócio.",
     "D. ESTILO REALISTA POR PADRÃO: a descricao_fundo descreve uma FOTO REAL, nunca ilustração/desenho/3D. EXCEÇÃO guiada pelo tema: assuntos infantis ou lúdicos/festivos/fantasiosos (festa de criança, brinquedos, produtos de bebê, doces infantis) PODEM pedir ilustração/desenho quando combinar melhor com o post — é exceção, não regra geral.",
-    "E. TIPO DE CENA (com pessoas ou só o produto): cada geração recebe o tipo da vez, num ciclo de DUAS cenas com pessoas para UMA só com o produto — é assim que o feed do cliente varia. Siga o tipo pedido, MAS O TEMA MANDA MAIS: se o tema do post claramente pede uma pessoa (atendimento, acolhimento, equipe, cuidado, conversa, antes e depois), use pessoas mesmo sendo a vez do produto; e se o tema claramente não combina com pessoa, deixe a cena só com o produto mesmo sendo a vez das pessoas. O objetivo é variar sem forçar o que não combina.",
-    "F. CENAS SÓ COM O PRODUTO: sem pessoa na cena o produto é o PROTAGONISTA, então a exigência de realismo é MAIOR, não menor — descreva FOTOGRAFIA REAL de alta qualidade, com textura e material visíveis, foco nítido e acabamento premium, nunca com aparência de ilustração, desenho ou render 3D (a exceção da diretriz D continua valendo SÓ para temas infantis/lúdicos). O produto fica CENTRALIZADO no miolo da imagem. EMBALAGENS: este app não usa marcas reais, então NÃO centre a cena em embalagem fechada com rótulo — mostre o PRODUTO EM SI, à mostra (os biscoitos fora do pacote, o pão na tábua, o doce no prato). Embalagem pode aparecer de vez em quando, discreta e nunca como foco, e SEM rótulo, marca, nome ou qualquer texto inventado — a cena continua sem letras.",
+    "E. QUANDO A HISTÓRIA FOR SÓ DE PRODUTO (sem pessoas): o produto é o PROTAGONISTA e a exigência de realismo é MAIOR — textura e material visíveis, foco nítido, acabamento premium, nunca com aparência de ilustração ou render 3D (a exceção da diretriz D continua valendo SÓ para temas infantis/lúdicos). EMBALAGENS: este app não usa marcas reais, então NÃO centre a cena em embalagem fechada com rótulo — mostre o PRODUTO EM SI, à mostra (os biscoitos fora do pacote, o pão na tábua, o doce no prato). Embalagem pode aparecer discreta, nunca como foco, e SEM rótulo, marca, nome ou qualquer texto inventado.",
     "",
     "REGRAS: NUNCA invente produtos/serviços que o cliente não informou. A descricao_fundo é interna e nunca é mostrada ao cliente. Ao se referir à IA nos textos ao cliente, diga \"nossa IA\".",
   ].join("\n");
@@ -1166,15 +1159,10 @@ async function gerarPostNegocioReal(profile) {
     blocoHist,
     blocoFamilia,
     "",
-    tipoCena === "produto"
-      ? "TIPO DE CENA DESTA GERAÇÃO (vez do ciclo 2 com pessoas : 1 só produto): SÓ O PRODUTO, sem pessoas na cena — produto realista e centralizado, à mostra, sem embalagem com rótulo (diretrizes E e F)."
-      : "TIPO DE CENA DESTA GERAÇÃO (vez do ciclo 2 com pessoas : 1 só produto): COM PESSOAS na cena (diretriz E).",
-    "Se o tema do post claramente não combinar com esse tipo, o tema manda — a diretriz E autoriza trocar.",
-    "",
     usaGanchos
       ? "Antes de escrever qualquer palavra: escolha a família de gancho, confirme que consegue PAGAR a promessa dela com o que está nas respostas acima (R1) e só então escreva chamada, legenda e CTA na mesma passada."
       : "",
-    "Lembre-se: mantenha o assunto centralizado no miolo, deixe o topo e a base calmos, e varie a cena a cada post. Responda só com o JSON.",
+    "Lembre-se: primeiro a IDEIA, depois a HISTÓRIA que prova o gancho, e só então o QUADRO. Toda a ação nos 50% centrais, topo e base calmos, e cena diferente a cada post. Responda só com o JSON.",
   ]
     .filter(Boolean)
     .join("\n");
@@ -1209,6 +1197,7 @@ async function gerarPostNegocioReal(profile) {
     dbg.familiaEscolhida = fam
       ? nomeDaFamilia(fam)
       : `(não reconhecida — a nossa IA devolveu "${(j.familia || "").trim() || "nada"}")`;
+    dbg.historiaVisual = (j.historia_visual || "").trim();
   }
 
   // Passo 3 da referência: a IA de imagem gera a imagem LIMPA (sem texto),
@@ -1219,8 +1208,7 @@ async function gerarPostNegocioReal(profile) {
   // descrever a cena indesejada faz ele reproduzi-la). A anti-repetição é
   // feita no Claude; aqui a lista serve só para o painel de desenvolvedor.
   const historicoCenas = hist.map((h) => h.cena || h.resumoCena).filter(Boolean);
-  const { imagem, promptImagem, msImagem } =
-    await gerarImagemLimpaNegocio(j, tipoCena);
+  const { imagem, promptImagem, msImagem } = await gerarImagemLimpaNegocio(j);
 
   if (dbg) {
     dbg.promptImagem = promptImagem;
@@ -1240,9 +1228,6 @@ async function gerarPostNegocioReal(profile) {
     // geração. Vazia quando a nossa IA devolveu algo que não reconhecemos:
     // aí o post sai igual e só a contagem não conta este.
     familia: normalizarFamilia(j.familia),
-    // O que foi PEDIDO nesta vez. É o que faz o ciclo 2:1 andar. Se a diretriz E
-    // tiver deixado o tema sobrepor a vez, o registro não reflete o que saiu.
-    cenaTipo: tipoCena,
     temaTexto: [(j.texto_imagem || "").trim(), (j.cta || "").trim()].filter(Boolean).join(" · "),
     tom: tons,
     corDestaque: corDeLayout(profile),
@@ -1262,17 +1247,16 @@ async function gerarPostNegocioReal(profile) {
 }
 
 // Gera a imagem de fundo LIMPA (sem texto) a partir da descricao_fundo.
-// A composição é FIXA: o assunto fica no miolo (60% centrais) e as faixas de
-// topo e base ficam calmas, porque uma camada gráfica (faixa colorida + logo +
-// texto grande) será aplicada por cima delas. Retorna
+// A composição é FIXA: toda a ação fica no miolo (50% centrais) e as faixas de
+// topo e base (25% cada) ficam calmas, porque uma camada gráfica (faixa
+// colorida + logo + texto grande) será aplicada por cima delas. Retorna
 // { imagem, resumoCena, promptImagem, msImagem }: imagem é null se falhar ou se
 // a IA de imagem estiver desligada (a tela usa o placeholder demo), resumoCena
 // alimenta o histórico anti-repetição do cliente, e promptImagem/msImagem
 // existem só para o painel de desenvolvedor ler (quem gera o post os ignora).
-// tipoCena ("pessoas" | "produto") é a vez do ciclo 2:1 decidida por
-// proximoTipoCena. Tem valor padrão para nenhuma chamada existente mudar de
-// comportamento: sem o parâmetro, segue o de sempre (cena com pessoas).
-async function gerarImagemLimpaNegocio(j, tipoCena = "pessoas") {
+// Se a cena tem pessoas ou é só de produto quem decide é a HISTÓRIA escrita na
+// descricao_fundo — aqui não há mais tipo de cena imposto de fora.
+async function gerarImagemLimpaNegocio(j) {
   const fundo = (j.descricao_fundo || "").trim();
 
   // A IA de imagem é "sem memória" e converge para a mesma cena a cada chamada.
@@ -1305,27 +1289,26 @@ async function gerarImagemLimpaNegocio(j, tipoCena = "pessoas") {
 
   const temaMensagem = (j.texto_imagem || "").trim();
 
-  // Estilo conforme a vez do ciclo. A versão de produto é escrita de forma
-  // POSITIVA ("a cena mostra apenas o produto e o ambiente") em vez de "sem
-  // pessoas": o gerador de imagem não entende negação — descrever o que não se
-  // quer faz ele produzir justamente aquilo.
-  const estilo = tipoCena === "produto"
-    ? "ESTILO OBRIGATÓRIO: FOTOGRAFIA REAL de produto (foto de verdade), de alta qualidade. A cena mostra APENAS o produto e o ambiente ao redor dele, com astral positivo e acolhedor. O produto é o protagonista, centralizado no miolo: textura e material visíveis, foco nítido, acabamento premium, luz de fotografia profissional de produto. NÃO use ilustração, desenho, arte digital, 3D ou render — sem pessoa na cena, o produto é o que o cliente olha e não pode parecer desenhado. EXCEÇÃO: só quando o tema for infantil ou lúdico/festivo/fantasioso (festa de criança, brinquedos, produtos de bebê, doces infantis) a imagem PODE ser ilustração ou desenho. EMBALAGEM: mostre o PRODUTO EM SI, à mostra e exposto (os biscoitos fora do pacote, o pão na tábua, o doce no prato). Se aparecer alguma embalagem, ela é discreta e lisa, sem rótulo, sem marca, sem nome e sem nenhum texto."
-    : "ESTILO OBRIGATÓRIO: fotografia REAL (foto de verdade), com pessoas reais na cena, com astral positivo e acolhedor. NÃO use ilustração, desenho, arte digital, 3D ou render. EXCEÇÃO: quando o tema for infantil ou lúdico/festivo/fantasioso (festa de criança, brinquedos, produtos de bebê, doces infantis), a imagem PODE ser ilustração ou desenho se combinar melhor com o universo do post — é uma exceção guiada pelo tema, não uma liberação geral; fora desses casos, mantenha a foto realista.";
+  // Estilo ÚNICO: fotografia real de alta qualidade. Quem decide se há pessoas
+  // na cena é a descricao_fundo (a HISTÓRIA), não uma regra daqui — dois donos
+  // para a mesma decisão faziam o estilo contradizer a cena. Tudo é escrito de
+  // forma POSITIVA: o gerador de imagem não entende negação, então descrever o
+  // que não se quer faz ele produzir justamente aquilo.
+  const estilo = "ESTILO OBRIGATÓRIO: fotografia REAL (foto de verdade) de alta qualidade, com textura e material visíveis, foco nítido e acabamento premium. NÃO use ilustração, desenho, arte digital, 3D ou render. EXCEÇÃO: quando o tema for infantil ou lúdico/festivo/fantasioso (festa de criança, brinquedos, produtos de bebê, doces infantis), a imagem PODE ser ilustração ou desenho se combinar melhor com o universo do post — é uma exceção guiada pelo tema, não uma liberação geral. EMBALAGEM: mostre o PRODUTO EM SI, à mostra e exposto (os biscoitos fora do pacote, o pão na tábua, o doce no prato). Se aparecer alguma embalagem, ela é discreta e lisa, sem rótulo, sem marca, sem nome e sem nenhum texto.";
 
   marcarPasso("montagem do prompt da imagem");
   const prompt = [
     // Regra de composição em PRIMEIRO lugar, antes da cena: o gerador segue
     // melhor o que lê primeiro. Explica o MOTIVO (a camada gráfica que entra
-    // por cima) e usa linguagem de fotografia em vez de porcentagens.
-    "COMPOSIÇÃO (regra mais importante, vale acima de qualquer outra parte desta descrição): enquadre em PLANO ABERTO ou PLANO MÉDIO, NUNCA em close-up. Câmera afastada, com espaço vazio generoso acima da cabeça: se houver pessoas, o topo da cabeça começa por volta de um terço da altura da imagem, e o rosto inteiro — do topo da cabeça ao queixo — fica no miolo, folgado. O terço de cima e a faixa de baixo da imagem mostram APENAS ambiente: teto, parede, céu, prateleira desfocada, balcão, chão, fundo neutro e desfocado — sem rostos, sem cabeças, sem o produto principal, sem detalhe fino nem contraste forte. MOTIVO: sobre a faixa de cima será aplicada uma faixa escura com a frase do post, e sobre a faixa de baixo o logo da marca e a chamada para ação; qualquer rosto ou elemento importante nessas áreas será coberto e o post fica perdido. A imagem é limpa: SEM TEXTO, SEM LETRAS, SEM PALAVRAS, sem números e sem logotipos.",
+    // por cima) e divide a imagem em 25 / 50 / 25 — os mesmos números da
+    // diretriz A do prompt do sistema.
+    "COMPOSIÇÃO (regra mais importante, vale acima de qualquer outra parte desta descrição): a imagem se divide em três faixas horizontais — o QUARTO DE CIMA (25% da altura), o MIOLO (os 50% centrais) e o QUARTO DE BAIXO (25%). TODA a ação, as pessoas e os objetos importantes ficam inteiros dentro do MIOLO, com a câmera afastada o bastante para a cena caber ali; NUNCA em close-up. O quarto de cima e o quarto de baixo mostram APENAS ambiente: teto, parede, céu, prateleira desfocada, balcão, chão, fundo neutro e desfocado — sem rostos, sem cabeças, sem o assunto principal, sem detalhe fino nem contraste forte. MOTIVO: sobre a faixa de cima será aplicada uma faixa escura com a frase do post, e sobre a faixa de baixo o logo da marca e a chamada para ação; qualquer elemento importante nessas áreas será coberto e o post fica perdido. A imagem é limpa: SEM TEXTO, SEM LETRAS, SEM PALAVRAS, sem números e sem logotipos.",
     fundo,
-    // Estilo: fotografia REAL sempre; a cena é com pessoas ou só com o produto
-    // conforme a vez do ciclo. Ilustração só como exceção guiada pelo tema.
+    // Estilo: fotografia REAL sempre. Ilustração só como exceção guiada pelo tema.
     estilo,
-    // A cena deve conversar com a mensagem que entra por cima (imagem e texto aludem-se).
+    // A cena existe para PROVAR a mensagem que entra por cima — não só aludir.
     temaMensagem
-      ? `A cena deve ALUDIR à mensagem que será aplicada por cima: "${temaMensagem}". Imagem e texto conversam — sem escrever esse texto nem qualquer palavra na cena.`
+      ? `A cena precisa PROVAR visualmente esta mensagem, que será aplicada por cima: "${temaMensagem}". Quem olhar a cena sem o texto já entende parte da ideia — sem escrever esse texto nem qualquer palavra na cena.`
       : "",
     `Variação obrigatória desta geração: ${angulo}; ${composicao}; ${luz}.`,
     "Crie uma CENA DIFERENTE das anteriores — outro cenário, ângulo, enquadramento e composição — mantendo o mesmo segmento e a identidade do negócio.",
@@ -1967,6 +1950,9 @@ function PainelDev() {
   const ganchos = [
     "Público (regime de copy): " + (d.publico || "—"),
     "Família escolhida neste post: " + (d.familiaEscolhida || "—"),
+    // O que a cena está contando e por que isso prova o gancho. Campo interno:
+    // não vai ao cliente nem à IA de imagem — a descricao_fundo já o traduz.
+    "História visual da cena: " + (d.historiaVisual || "—"),
     "",
     "Bloco da escolha da família (regra R4) enviado ao Claude:",
     d.blocoFamilia || "(nenhum — cliente sem biblioteca de ganchos, ou primeiro post)",
